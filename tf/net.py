@@ -221,6 +221,14 @@ class Net:
 
         return blocks // ws['residual']
 
+    def se_ratio(self):
+        if not self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
+            return 0
+        w = self.get_weights()
+        ws = self.get_weight_amounts()
+        return self.filters // len(w[ws['input'] + ws['residual'] - 4])
+        
+
     def print_stats(self):
         print("Blocks: {}".format(self.blocks()))
         print("Filters: {}".format(self.filters()))
@@ -230,6 +238,19 @@ class Net:
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
+        # Populate policyFormat and valueFormat fields in old protobufs
+        # without these fields.
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+        elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+
+    def parse_proto_from_data(self, data):
+        self.pb = self.pb.FromString(data)
         # Populate policyFormat and valueFormat fields in old protobufs
         # without these fields.
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
