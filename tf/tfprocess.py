@@ -105,7 +105,7 @@ class TFProcess:
         self.model = tf.keras.Model(inputs=input_var, outputs=self.construct_net_v2(x_planes))
 
     def infer(self, input_batch):
-        y,z = self.model(input_batch)
+        y,z = self.model(input_batch, training=False)
         y = tf.cast(y, tf.float32)
         z = tf.cast(z, tf.float32)
         return y, tf.nn.softmax(z)
@@ -196,8 +196,8 @@ class TFProcess:
                 else:
                     weights.assign(new_weight)
                 # need to use the variance to also populate the stddev for renorm, so adjust offset.
-                if 'variance:' in weights.name and self.renorm_enabled:
-                    offset-=1
+                #if 'variance:' in weights.name and self.renorm_enabled:
+                #    offset-=1
             last_was_gamma = 'gamma:' in weights.name
 
     def batch_norm_v2(self, input, scale=False):
@@ -209,18 +209,18 @@ class TFProcess:
         assert channels % self.SE_ratio == 0
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_first')(inputs)
-        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
-        excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
+        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio)(pooled))
+        excited = tf.keras.layers.Dense(2 * channels)(squeezed)
         return ApplySqueezeExcitation()([inputs, excited])
 
     def conv_block_v2(self, inputs, filter_size, output_channels, bn_scale=False):
-        conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
+        conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', data_format='channels_first')(inputs)
         return tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv, scale=bn_scale))
 
     def residual_block_v2(self, inputs, channels):
-        conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
+        conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', data_format='channels_first')(inputs)
         out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv1, scale=False))
-        conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(out1)
+        conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', data_format='channels_first')(out1)
         out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, scale=True), channels)
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
 
@@ -231,12 +231,12 @@ class TFProcess:
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
             conv_pol = self.conv_block_v2(flow, filter_size=3, output_channels=self.RESIDUAL_FILTERS)
-            conv_pol2 = tf.keras.layers.Conv2D(80, 3, use_bias=True, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, data_format='channels_first')(conv_pol)
+            conv_pol2 = tf.keras.layers.Conv2D(80, 3, use_bias=True, padding='same', data_format='channels_first')(conv_pol)
             h_fc1 = ApplyPolicyMap()(conv_pol2)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
             conv_pol = self.conv_block_v2(flow, filter_size=1, output_channels=self.policy_channels)
             h_conv_pol_flat = tf.keras.layers.Flatten()(conv_pol)
-            h_fc1 = tf.keras.layers.Dense(1858, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_conv_pol_flat)
+            h_fc1 = tf.keras.layers.Dense(1858, kernel_initializer='glorot_normal')(h_conv_pol_flat)
         else:
             raise ValueError(
                 "Unknown policy head type {}".format(self.POLICY_HEAD))
@@ -244,10 +244,10 @@ class TFProcess:
         # Value head
         conv_val = self.conv_block_v2(flow, filter_size=1, output_channels=32)
         h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
-        h_fc2 = tf.keras.layers.Dense(128, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu')(h_conv_val_flat)
+        h_fc2 = tf.keras.layers.Dense(128, activation='relu')(h_conv_val_flat)
         if self.wdl:
-            h_fc3 = tf.keras.layers.Dense(3, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_fc2)
+            h_fc3 = tf.keras.layers.Dense(3)(h_fc2)
         else:
-            h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh')(h_fc2)
+            h_fc3 = tf.keras.layers.Dense(1, activation='tanh')(h_fc2)
         return h_fc1, h_fc3
 

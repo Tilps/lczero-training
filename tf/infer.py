@@ -21,6 +21,7 @@ import os
 import yaml
 import sys
 import mmap
+import time
 import tensorflow as tf
 import struct
 from tfprocess import TFProcess
@@ -30,23 +31,23 @@ def main(cmd):
     cfg = yaml.safe_load(cmd.cfg.read())
     print(yaml.dump(cfg, default_flow_style=False))
 
-    file_to_mmap = cfg['infer']['mmap_file']:
-    net = Net()
+    file_to_mmap = cfg['infer']['mmap_file']
     print('Waiting for mmap', end='')
-    while not os.exists(file_to_mmap):
-        print('.', end='')
-        os.sleep(1)
+    while not os.path.exists(file_to_mmap):
+        print('.', end='', flush=True)
+        time.sleep(1)
     print('')
-    with open(file_to_mmap, "wb") as f:
-        mmap.mmap(f.fileno(), 0)
+    with open(file_to_mmap, "r+b") as f:
+        data_view = mmap.mmap(f.fileno(), 0)
         print('Waiting for network', end='')
-        while (struct.unpack_from("Q", mmap, 0) != 1):
-            print('.', end='')
-            os.sleep(1)
+        while (struct.unpack_from("Q", data_view, 0)[0] != 1):
+            print('.', struct.unpack_from("Q", data_view, 0), end='', flush=True)
+            time.sleep(1)
         print('')
-        struct.pack_into("Q", mmap, 0, 0)
-        net_length = struct.unpack_from("Q", mmap, 16)
-        net.parse_proto_from_data(mmap[24:24+net_length])
+        struct.pack_into("Q", data_view, 0, 0)
+        net_length = struct.unpack_from("Q", data_view, 16)[0]
+        net = Net()
+        net.parse_proto_from_data(data_view[32:32+net_length])
         cfg['model']['filters'] = net.filters()
         cfg['model']['residual_blocks'] = net.blocks()
         cfg['model']['se_ratio'] = net.se_ratio()
@@ -56,20 +57,34 @@ def main(cmd):
         tfprocess.replace_weights_v2(net.get_weights())
 
         def infer(input_batch):
-            tfprocess.infer(input_batch)
-        fast_infer = @tf.function(infer, input_signature=[tf.TensorSpec(shape=(None, 112, 64), dtype=tf.float32)])
-        struct.pack_into("Q", mmap, 8, 1)
-        while (struct.unpack_from("Q", mmap, 0) != 2):        
-        struct.pack_into("Q", mmap, 0, 0)
-        data_len = struct.unpack_from("Q", mmap, 16)
-        ib = tf.io.decode_raw(mmap[24:24+112*64*4*data_len], tf.float32)
-        ib = tf.reshape(ib, [-1, 112, 64])
-        p,wdl = fast_infer(ib)
-        mmap[24+112*64*4*1024:24+112*64*4*1024+1858*4*data_len] = p.numpy().to_bytes()
-        mmap[24+112*64*4*1024+1858*4*1024:24+112*64*4*1024+1858*4*1024+3*4*data_len] = wdl.numpy().to_bytes()
-        struct.pack_into("Q", mmap, 8, 2)
+            return tfprocess.infer(input_batch)
+        fast_infer = tf.function(infer, input_signature=[tf.TensorSpec(shape=(None, 112, 64), dtype=tf.float32)])
+        @tf.function()
+        def infer_from_view(data_view, data_len):
+            ib = tf.io.decode_raw(data_view[32:32+112*64*4*data_len], tf.float32)
+            ib = tf.reshape(ib, [-1, 112, 64])
+            p,wdl = fast_infer(ib)
+            return p, wdl
 
-        mmap.close()
+        struct.pack_into("Q", data_view, 8, 1)
+        while True:
+            enter = time.clock()
+            while (struct.unpack_from("Q", data_view, 0)[0] != 2):
+                continue
+            waited = time.clock()
+            struct.pack_into("Q", data_view, 0, 0)
+            data_len = struct.unpack_from("Q", data_view, 16)[0]
+            infer_start = time.clock()
+            p,wdl = infer_from_view(data_view, data_len)
+            infer_done = time.clock()
+            memoryview(data_view)[32+112*64*4*1024:32+112*64*4*1024+1858*4*data_len] = memoryview(p).cast('B')
+            memoryview(data_view)[32+112*64*4*1024+1858*4*1024:32+112*64*4*1024+1858*4*1024+3*4*data_len] = memoryview(wdl).cast('B')
+            struct.pack_into("Q", data_view, 8, 2)
+            sent_data = time.clock()
+            print(data_len)
+            print(waited-enter, infer_start-waited, infer_done-infer_start, sent_data-infer_done)
+
+        data_view.close()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\

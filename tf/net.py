@@ -226,8 +226,8 @@ class Net:
             return 0
         w = self.get_weights()
         ws = self.get_weight_amounts()
-        return self.filters // len(w[ws['input'] + ws['residual'] - 4])
-        
+        print(len(w[ws['input'] + ws['residual'] - 3]))
+        return self.filters() // len(w[ws['input'] + ws['residual'] - 3])
 
     def print_stats(self):
         print("Blocks: {}".format(self.blocks()))
