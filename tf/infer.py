@@ -59,7 +59,6 @@ def main(cmd):
         def infer(input_batch):
             return tfprocess.infer(input_batch)
         fast_infer = tf.function(infer, input_signature=[tf.TensorSpec(shape=(None, 112, 64), dtype=tf.float32)])
-        @tf.function()
         def infer_from_view(data_view, data_len):
             ib = tf.io.decode_raw(data_view[32:32+112*64*4*data_len], tf.float32)
             ib = tf.reshape(ib, [-1, 112, 64])
