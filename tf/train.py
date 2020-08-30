@@ -403,19 +403,6 @@ def main(cmd):
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extractor).prefetch(4)
-    else:
-        train_parser = ChunkParser(train_chunks,
-                                   tfprocess.INPUT_MODE,
-                                   shuffle_size=shuffle_size,
-                                   sample=SKIP,
-                                   batch_size=ChunkParser.BATCH_SIZE,
-                                   workers=train_workers)
-        train_dataset = tf.data.Dataset.from_generator(
-            train_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        train_dataset = train_dataset.map(ChunkParser.parse_function)
-        train_dataset = train_dataset.prefetch(4)
 
     shuffle_size = int(shuffle_size * (1.0 - train_ratio))
     if experimental_parser:
@@ -424,19 +411,6 @@ def main(cmd):
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extractor).prefetch(4)
-    else:
-        test_parser = ChunkParser(test_chunks,
-                                  tfprocess.INPUT_MODE,
-                                  shuffle_size=shuffle_size,
-                                  sample=SKIP,
-                                  batch_size=ChunkParser.BATCH_SIZE,
-                                  workers=test_workers)
-        test_dataset = tf.data.Dataset.from_generator(
-            test_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        test_dataset = test_dataset.map(ChunkParser.parse_function)
-        test_dataset = test_dataset.prefetch(4)
 
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
@@ -461,15 +435,6 @@ def main(cmd):
     tfprocess.process_loop_v2(total_batch_size,
                               num_evals,
                               batch_splits=batch_splits)
-
-    if cmd.output is not None:
-        if cfg['training'].get('swa_output', False):
-            tfprocess.save_swa_weights_v2(cmd.output)
-        else:
-            tfprocess.save_leelaz_weights_v2(cmd.output)
-
-    train_parser.shutdown()
-    test_parser.shutdown()
 
 
 if __name__ == "__main__":
