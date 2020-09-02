@@ -83,9 +83,9 @@ class ConvBlockLayer(tf.keras.layers.Layer):
         self.batch_norm = config_source.make_batch_norm(name=name + '/bn', scale=bn_scale)
         self.activation = tf.keras.layers.Activation('relu')
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         conved = self.conv(inputs)
-        bned = self.batch_norm(conved)
+        bned = self.batch_norm(conved, training=training)
         return self.activation(bned)
 
 class ResidualBlockLayer(tf.keras.layers.Layer):
@@ -112,12 +112,12 @@ class ResidualBlockLayer(tf.keras.layers.Layer):
         self.batch_norm2 = config_source.make_batch_norm(name=name + '/2/bn', scale=True)
         self.SE = SqueezeExcitationLayer(config_source, channels, name=name+'/se')
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         conved1 = self.conv1(inputs)
-        bned1 = self.batch_norm1(conved1)
+        bned1 = self.batch_norm1(conved1, training=training)
         activated1 = self.activation(bned1)
         conved2 = self.conv2(activated1)
-        bned2 = self.batch_norm2(conved2)
+        bned2 = self.batch_norm2(conved2, training=training)
         seed = self.SE(bned2)
         return self.activation(tf.keras.layers.add([inputs, seed]))
 
@@ -130,10 +130,10 @@ class InitialStackLayer(tf.keras.layers.Layer):
         for i in range(config_source.INITIAL_RESIDUAL_BLOCKS):
             self.body.append(ResidualBlockLayer(config_source, config_source.RESIDUAL_FILTERS, name=name+'/residual_{}'.format(i+1)))
 
-    def call(self, inputs):
-        flow = self.conv(inputs)
+    def call(self, inputs, training=None):
+        flow = self.conv(inputs, training=training)
         for residual in self.body:
-            flow = residual(flow)
+            flow = residual(flow, training=training)
         return flow
 
 
@@ -144,10 +144,10 @@ class MainStackLayer(tf.keras.layers.Layer):
         for i in range(config_source.RESIDUAL_BLOCKS):
             self.body.append(ResidualBlockLayer(config_source, config_source.RESIDUAL_FILTERS, name=name+'/residual_{}'.format(i+1)))
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         flow = inputs
         for residual in self.body:
-            flow = residual(flow)
+            flow = residual(flow, training=training)
         return flow
 
 
@@ -178,8 +178,8 @@ class PolicyHeadLayer(tf.keras.layers.Layer):
                 name=name+'/policy')
         self.applier = ApplyPolicyMap()
 
-    def call(self, inputs):
-        conved1 = self.conv1(inputs)
+    def call(self, inputs, training=None):
+        conved1 = self.conv1(inputs, training=training)
         conved2 = self.conv2(conved1)
         return self.applier(conved2)
 
@@ -199,8 +199,8 @@ class ValueHeadLayer(tf.keras.layers.Layer):
                                           bias_regularizer=config_source.l2reg,
                                           name=name+'/value/dense2')
 
-    def call(self, inputs):
-        conved = self.conv(inputs)
+    def call(self, inputs, training=None):
+        conved = self.conv(inputs, training=training)
         flattened = self.flatten(conved)
         densed1 = self.dense1(flattened)
         return self.dense2(densed1)
@@ -221,11 +221,15 @@ class MovesLeftHeadLayer(tf.keras.layers.Layer):
                                           activation='relu',
                                           name=name+'/moves_left/dense2')
 
-    def call(self, inputs):
-        conved = self.conv(inputs)
+    def call(self, inputs, training=None):
+        conved = self.conv(inputs, training=training)
         flattened = self.flatten(conved)
         densed1 = self.dense1(flattened)
         return self.dense2(densed1)
+
+
+def partial_stop(flow, allow):
+    return allow * flow + tf.stop_gradient((1.0 - allow) * flow)
 
 
 class RecursiveStackModel(tf.keras.Model):
@@ -239,14 +243,14 @@ class RecursiveStackModel(tf.keras.Model):
         self.movesleft = MovesLeftHeadLayer(config_source, name=name+'/ml')
         self.unroll = 10 
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         reshaped = self.reshape(inputs)
-        firsted = self.first(reshaped)
-        results = [(self.policy(firsted), self.value(firsted), self.movesleft(firsted))]
+        firsted = self.first(reshaped, training=training)
+        results = [(self.policy(firsted, training=training), self.value(firsted, training=training), self.movesleft(firsted, training=training))]
         flow = firsted
         for i in range(self.unroll):
-            flow = self.recursive(flow)
-            results.append((self.policy(flow), self.value(flow), self.movesleft(flow)))
+            flow = self.recursive(partial_stop(flow, 0.5), training=training)
+            results.append((self.policy(flow, training=training), self.value(flow, training=training), self.movesleft(flow, training=training)))
         return results
 
 
@@ -258,7 +262,7 @@ class TFProcess:
 
         # Network structure
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
-        self.INITIAL_RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks'] * 2 ##TODO: give it its own setting.
+        self.INITIAL_RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks'] ##TODO: give it its own setting.
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         precision = self.cfg['training'].get('precision', 'single')
@@ -683,11 +687,11 @@ class TFProcess:
 
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
-        #if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg[
-        #        'training']['total_steps'] == 0:
-        #    self.calculate_test_summaries_v2(test_batches, steps)
-        #    if self.swa_enabled:
-        #        self.calculate_swa_summaries_v2(test_batches, steps)
+        if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg[
+                'training']['total_steps'] == 0:
+            self.calculate_test_summaries_v2(test_batches, steps)
+            if self.swa_enabled:
+                self.calculate_swa_summaries_v2(test_batches, steps)
 
         #if self.validation_dataset is not None and (
         #        steps % self.cfg['training']['validation_steps'] == 0
@@ -719,105 +723,97 @@ class TFProcess:
 
     @tf.function()
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
+        policy_losses = []
+        policy_accuracies = []
+        policy_entropies = []
+        policy_uls = []
+        value_losses = []
+        mse_losses = []
+        value_accuracies = []
+        moves_left_losses = []
+        moves_left_mean_errors = []
         outputs = self.model(x, training=False)
-        policy = outputs[0]
-        value = outputs[1]
-        policy_loss = self.policy_loss_fn(y, policy)
-        policy_accuracy = self.policy_accuracy_fn(y, policy)
-        policy_entropy = self.policy_entropy_fn(y, policy)
-        policy_ul = self.policy_uniform_loss_fn(y, policy)
-        if self.wdl:
+        for policy, value, moves_left in outputs:
+            policy_loss = self.policy_loss_fn(y, policy)
+            policy_accuracy = self.policy_accuracy_fn(y, policy)
+            policy_entropy = self.policy_entropy_fn(y, policy)
+            policy_ul = self.policy_uniform_loss_fn(y, policy)
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
             value_accuracy = self.accuracy_fn(self.qMix(z, q), value)
-        else:
-            value_loss = self.value_loss_fn(self.qMix(z, q), value)
-            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-            value_accuracy = tf.constant(0.)
-        if self.moves_left:
-            moves_left = outputs[2]
             moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             moves_left_mean_error = self.moves_left_mean_error(m, moves_left)
-        else:
-            moves_left_loss = tf.constant(0.)
-            moves_left_mean_error = tf.constant(0.)
+            policy_losses.append(policy_loss)
+            policy_accuracies.append(policy_accuracy)
+            policy_entropies.append(policy_entropy)
+            policy_uls.append(policy_ul)
+            value_losses.append(value_loss)
+            mse_losses.append(mse_loss)
+            value_accuracies.append(value_accuracy)
+            moves_left_losses.append(moves_left_loss)
+            moves_left_mean_errors.append(moves_left_mean_error)
 
-        return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
+        return policy_losses, value_losses, moves_left_losses, mse_losses, policy_accuracies, value_accuracies, moves_left_mean_errors, policy_entropies, policy_uls
 
     def calculate_test_summaries_v2(self, test_batches, steps):
-        sum_policy_accuracy = 0
-        sum_value_accuracy = 0
-        sum_moves_left = 0
-        sum_moves_left_mean_error = 0
-        sum_mse = 0
-        sum_policy = 0
-        sum_value = 0
-        sum_policy_entropy = 0
-        sum_policy_ul = 0
+        sum_policy_accuracy = []
+        sum_value_accuracy = []
+        sum_moves_left = []
+        sum_moves_left_mean_error = []
+        sum_mse = []
+        sum_policy = []
+        sum_value = []
+        sum_policy_entropy = []
+        sum_policy_ul = []
         for _ in range(0, test_batches):
             x, y, z, q, m = next(self.test_iter)
             policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
                 x, y, z, q, m)
-            sum_policy_accuracy += policy_accuracy
-            sum_policy_entropy += policy_entropy
-            sum_policy_ul += policy_ul
-            sum_mse += mse_loss
-            sum_policy += policy_loss
-            if self.wdl:
-                sum_value_accuracy += value_accuracy
-                sum_value += value_loss
-            if self.moves_left:
-                sum_moves_left += moves_left_loss
-                sum_moves_left_mean_error += moves_left_mean_error
-        sum_policy_accuracy /= test_batches
-        sum_policy_accuracy *= 100
-        sum_policy /= test_batches
-        sum_value /= test_batches
-        if self.wdl:
-            sum_value_accuracy /= test_batches
-            sum_value_accuracy *= 100
-        # Additionally rescale to [0, 1] so divide by 4
-        sum_mse /= (4.0 * test_batches)
-        if self.moves_left:
-            sum_moves_left /= test_batches
-            sum_moves_left_mean_error /= test_batches
-        self.net.pb.training_params.learning_rate = self.lr
-        self.net.pb.training_params.mse_loss = sum_mse
-        self.net.pb.training_params.policy_loss = sum_policy
-        # TODO store value and value accuracy in pb
-        self.net.pb.training_params.accuracy = sum_policy_accuracy
+            sum_policy_accuracy.append(policy_accuracy)
+            sum_policy_entropy.append(policy_entropy)
+            sum_policy_ul.append(policy_ul)
+            sum_mse.append(mse_loss)
+            sum_policy.append(policy_loss)
+            sum_value_accuracy.append(value_accuracy)
+            sum_value.append(value_loss)
+            sum_moves_left.append(moves_left_loss)
+            sum_moves_left_mean_error.append(moves_left_mean_error)
+        sum_policy_accuracy = np.mean(sum_policy_accuracy, axis=0)
+        sum_value_accuracy = np.mean(sum_value_accuracy, axis=0)
+        sum_moves_left = np.mean(sum_moves_left, axis=0)
+        sum_moves_left_mean_error = np.mean(sum_moves_left_mean_error, axis=0)
+        sum_mse = np.mean(sum_mse, axis=0)
+        sum_policy = np.mean(sum_policy, axis=0)
+        sum_value = np.mean(sum_value, axis=0)
+        sum_policy_entropy = np.mean(sum_policy_entropy, axis=0)
+        sum_policy_ul = np.mean(sum_policy_ul, axis=0)
+
         with self.test_writer.as_default():
-            tf.summary.scalar("Policy Loss", sum_policy, step=steps)
-            tf.summary.scalar("Value Loss", sum_value, step=steps)
-            tf.summary.scalar("MSE Loss", sum_mse, step=steps)
-            tf.summary.scalar("Policy Accuracy",
-                              sum_policy_accuracy,
-                              step=steps)
-            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
-            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
-            if self.wdl:
-                tf.summary.scalar("Value Accuracy",
-                                  sum_value_accuracy,
+            for i in range(len(sum_policy)):
+                tf.summary.scalar("Policy Loss {}".format(i), sum_policy[i], step=steps)
+                tf.summary.scalar("Value Loss {}".format(i), sum_value[i], step=steps)
+                tf.summary.scalar("MSE Loss {}".format(i), sum_mse[i], step=steps)
+                tf.summary.scalar("Policy Accuracy {}".format(i),
+                                  sum_policy_accuracy[i],
                                   step=steps)
-            if self.moves_left:
-                tf.summary.scalar("Moves Left Loss",
-                                  sum_moves_left,
+                tf.summary.scalar("Policy Entropy {}".format(i), sum_policy_entropy[i], step=steps)
+                tf.summary.scalar("Policy UL {}".format(i), sum_policy_ul[i], step=steps)
+                tf.summary.scalar("Value Accuracy {}".format(i),
+                                  sum_value_accuracy[i],
                                   step=steps)
-                tf.summary.scalar("Moves Left Mean Error",
-                                  sum_moves_left_mean_error,
+                tf.summary.scalar("Moves Left Loss {}".format(i),
+                                  sum_moves_left[i],
+                                  step=steps)
+                tf.summary.scalar("Moves Left Mean Error {}".format(i),
+                                  sum_moves_left_mean_error[i],
                                   step=steps)
             for w in self.model.weights:
                 tf.summary.histogram(w.name, w, step=steps)
         self.test_writer.flush()
 
-        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end = '')
-
-        if self.moves_left:
-            print(" moves={:g} moves mean={:g}".format(
-                sum_moves_left, sum_moves_left_mean_error))
-        else:
-            print()
+        for i in range(len(sum_policy)):
+            print("step {} depth {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g} moves={:g} moves mean={:g}".\
+                format(steps, i, sum_policy[i], sum_value[i], sum_policy_accuracy[i], sum_value_accuracy[i], sum_mse[i], sum_policy_entropy[i], sum_policy_ul[i], sum_moves_left[i], sum_moves_left_mean_error[i]))
 
     def calculate_swa_validations_v2(self, steps):
         backup = self.read_weights()
