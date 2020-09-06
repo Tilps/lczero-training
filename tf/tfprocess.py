@@ -329,6 +329,18 @@ class TFProcess:
         self.validation_dataset = validation_dataset
         self.init_net_v2()
 
+    def init_for_play(self):
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+        self.model = RecursiveStackModel(self, name='model')
+        self.checkpoint = tf.train.Checkpoint(model=self.model)
+        #self.checkpoint.listed = self.swa_weights
+        self.manager = tf.train.CheckpointManager(
+            self.checkpoint,
+            directory=self.root_dir,
+            max_to_keep=50,
+            keep_checkpoint_every_n_hours=24,
+            checkpoint_name=self.cfg['name'])
+
     def init_net_v2(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         self.model = RecursiveStackModel(self, name='model')
@@ -508,10 +520,13 @@ class TFProcess:
             checkpoint_name=self.cfg['name'])
 
 
-    def restore_v2(self):
+    def restore_v2(self, partial=False):
         if self.manager.latest_checkpoint is not None:
             print("Restoring from {0}".format(self.manager.latest_checkpoint))
-            self.checkpoint.restore(self.manager.latest_checkpoint)
+            if partial:
+                self.checkpoint.restore(self.manager.latest_checkpoint).expect_partial()
+            else:
+                self.checkpoint.restore(self.manager.latest_checkpoint)
 
     def process_loop_v2(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
