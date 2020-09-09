@@ -28,12 +28,14 @@ import math
 import numpy as np
 import multiprocessing as mp
 import tensorflow as tf
+import logging
 from tfprocess import TFProcess
 from policy_index import policy_index
 from timeit import default_timer as timer
 
 
 def main(cmd):
+    tf.get_logger().setLevel(logging.ERROR)
     cfg = yaml.safe_load(cmd.cfg.read())
     print(yaml.dump(cfg, default_flow_style=False))
 
