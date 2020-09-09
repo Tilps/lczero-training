@@ -20,6 +20,7 @@ import numpy as np
 import os
 import random
 import tensorflow as tf
+import tensorflow_addons as tfa
 import time
 import bisect
 import lc0_az_policy_map
@@ -89,7 +90,7 @@ class ConvBlockLayer(tf.keras.layers.Layer):
         return self.activation(bned)
 
 class ResidualBlockLayer(tf.keras.layers.Layer):
-    def __init__(self, config_source, channels, name, bn_scale=False, **kwargs):
+    def __init__(self, config_source, channels, name, group=False, bn_scale=False, **kwargs):
         super(ResidualBlockLayer, self).__init__(name=name, **kwargs)
         self.conv1 = tf.keras.layers.Conv2D(channels,
                                       3,
@@ -99,7 +100,7 @@ class ResidualBlockLayer(tf.keras.layers.Layer):
                                       kernel_regularizer=config_source.l2reg,
                                       data_format='channels_first',
                                       name=name + '/1/conv2d')
-        self.batch_norm1 = config_source.make_batch_norm(name=name + '/1/bn', scale=False)
+        self.batch_norm1 = config_source.make_batch_norm(name=name + '/1/bn', scale=False, group=group)
         self.activation = tf.keras.layers.Activation('relu')
         self.conv2 = tf.keras.layers.Conv2D(channels,
                                       3,
@@ -109,7 +110,7 @@ class ResidualBlockLayer(tf.keras.layers.Layer):
                                       kernel_regularizer=config_source.l2reg,
                                       data_format='channels_first',
                                       name=name + '/2/conv2d')
-        self.batch_norm2 = config_source.make_batch_norm(name=name + '/2/bn', scale=True)
+        self.batch_norm2 = config_source.make_batch_norm(name=name + '/2/bn', scale=True, group=group)
         self.SE = SqueezeExcitationLayer(config_source, channels, name=name+'/se')
 
     def call(self, inputs, training=None):
@@ -142,7 +143,7 @@ class MainStackLayer(tf.keras.layers.Layer):
         super(MainStackLayer, self).__init__(name=name, **kwargs)
         self.body = []
         for i in range(config_source.RESIDUAL_BLOCKS):
-            self.body.append(ResidualBlockLayer(config_source, config_source.RESIDUAL_FILTERS, name=name+'/residual_{}'.format(i+1)))
+            self.body.append(ResidualBlockLayer(config_source, config_source.RESIDUAL_FILTERS, name=name+'/residual_{}'.format(i+1), group=True))
 
     def call(self, inputs, training=None):
         flow = inputs
@@ -949,28 +950,36 @@ class TFProcess:
                        (1. / (num + 1.)))
         self.swa_count.assign(min(num + 1., self.swa_max_n))
 
-    def make_batch_norm(self, name, scale=False):
-        if self.renorm_enabled:
-            clipping = {
-                "rmin": 1.0 / self.renorm_max_r,
-                "rmax": self.renorm_max_r,
-                "dmax": self.renorm_max_d
-            }
-            return tf.keras.layers.BatchNormalization(
-                epsilon=1e-5,
-                axis=1,
-                fused=False,
-                center=True,
-                scale=scale,
-                renorm=True,
-                renorm_clipping=clipping,
-                renorm_momentum=self.renorm_momentum,
-                name=name)
+    def make_batch_norm(self, name, scale=False, group=False):
+        if group:
+            return tfa.layers.GroupNormalization(
+                    epsilon=1e-5,
+                    axis=1,
+                    center=True,
+                    scale=scale,
+                    name=name)
         else:
-            return tf.keras.layers.BatchNormalization(
-                epsilon=1e-5,
-                axis=1,
-                center=True,
-                scale=scale,
-                virtual_batch_size=self.virtual_batch_size,
-                name=name)
+            if self.renorm_enabled:
+                clipping = {
+                    "rmin": 1.0 / self.renorm_max_r,
+                    "rmax": self.renorm_max_r,
+                    "dmax": self.renorm_max_d
+                }
+                return tf.keras.layers.BatchNormalization(
+                    epsilon=1e-5,
+                    axis=1,
+                    fused=False,
+                    center=True,
+                    scale=scale,
+                    renorm=True,
+                    renorm_clipping=clipping,
+                    renorm_momentum=self.renorm_momentum,
+                    name=name)
+            else:
+                return tf.keras.layers.BatchNormalization(
+                    epsilon=1e-5,
+                    axis=1,
+                    center=True,
+                    scale=scale,
+                    virtual_batch_size=self.virtual_batch_size,
+                    name=name)
