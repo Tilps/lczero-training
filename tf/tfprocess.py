@@ -27,6 +27,7 @@ import lc0_az_policy_map
 from functools import reduce
 import operator
 
+LAMBDA=0.7
 
 class ApplySqueezeExcitation(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
@@ -228,9 +229,36 @@ class MovesLeftHeadLayer(tf.keras.layers.Layer):
         densed1 = self.dense1(flattened)
         return self.dense2(densed1)
 
+class ShouldContinueHeadLayer(tf.keras.layers.Layer):
+    def __init__(self, config_source, name, **kwargs):
+        super(ShouldContinueHeadLayer, self).__init__(name=name, **kwargs)
+        self.conv = ConvBlockLayer(config_source, 1, 8, name=name+'/should_continue')
+        self.flatten = tf.keras.layers.Flatten()
+        self.dense1 = tf.keras.layers.Dense(128,
+                                      kernel_initializer='glorot_normal',
+                                      kernel_regularizer=config_source.l2reg,
+                                      activation='relu',
+                                      name=name+'/should_continue/dense1')
+        self.dense2 = tf.keras.layers.Dense(1,
+                                          kernel_initializer='glorot_normal',
+                                          kernel_regularizer=config_source.l2reg,
+                                          activation='sigmoid',
+                                          name=name+'/should_continue/dense2')
+
+    def call(self, inputs, training=None):
+        conved = self.conv(inputs, training=training)
+        flattened = self.flatten(conved)
+        densed1 = self.dense1(flattened)
+        return self.dense2(densed1)
+
 
 def partial_stop(flow, allow):
     return allow * flow + tf.stop_gradient((1.0 - allow) * flow)
+
+def mix(flow1, flow2, allow):
+    expanded_mix = tf.expand_dims(allow, -1)
+    expanded_mix = tf.expand_dims(expanded_mix, -1)
+    return expanded_mix * flow1 + (1.0 - expanded_mix) * flow2
 
 
 class RecursiveStackModel(tf.keras.Model):
@@ -242,16 +270,23 @@ class RecursiveStackModel(tf.keras.Model):
         self.policy = PolicyHeadLayer(config_source, name=name+'/p')
         self.value = ValueHeadLayer(config_source, name=name+'/v')
         self.movesleft = MovesLeftHeadLayer(config_source, name=name+'/ml')
-        self.unroll = 10 
+        self.should_continue = ShouldContinueHeadLayer(config_source, name=name+'/sc')
+        self.unroll = 5
+        self.testunroll = 10
 
     def call(self, inputs, training=None):
         reshaped = self.reshape(inputs)
         firsted = self.first(reshaped, training=training)
         results = [(self.policy(firsted, training=training), self.value(firsted, training=training), self.movesleft(firsted, training=training))]
+        sc = self.should_continue(firsted, training=training)
         flow = firsted
-        for i in range(self.unroll):
-            flow = self.recursive(partial_stop(flow, 0.5), training=training)
+        loops = self.unroll
+        if training==False:
+            loops = self.testunroll
+        for i in range(loops):
+            flow = mix(partial_stop(flow, LAMBDA), self.recursive(partial_stop(flow, LAMBDA), training=training), sc)
             results.append((self.policy(flow, training=training), self.value(flow, training=training), self.movesleft(flow, training=training)))
+            sc = self.should_continue(flow, training=training)
         return results
 
 
@@ -263,7 +298,7 @@ class TFProcess:
 
         # Network structure
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
-        self.INITIAL_RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks'] ##TODO: give it its own setting.
+        self.INITIAL_RESIDUAL_BLOCKS = self.cfg['model']['initial_residual_blocks']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         precision = self.cfg['training'].get('precision', 'single')
@@ -549,11 +584,16 @@ class TFProcess:
         value_losses = []
         mse_losses = []
         moves_left_losses = []
+        convergence_ratio = 1.0/(1.0-LAMBDA)
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
-            reg_term = sum(self.model.losses)
+            reg_term = sum(self.model.first.losses)*0.25+sum(self.model.recursive.losses)*1.0+sum(self.model.policy.losses)*1.0+sum(self.model.value.losses)*1.0+sum(self.model.movesleft.losses)*1.0+sum(self.model.should_continue.losses)*1.0
             total_loss = reg_term
+            index=0
             for policy, value, moves_left in outputs:
+                mult = len(outputs)/(len(outputs)+convergence_ratio)
+                if index == len(outputs)-1:
+                    mult *= convergence_ratio
                 policy_loss = self.policy_loss_fn(y, policy)
                 value_loss = self.value_loss_fn(self.qMix(z, q), value)
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
@@ -562,7 +602,8 @@ class TFProcess:
                 moves_left_losses.append(moves_left_loss)
 
                 total_loss += self.lossMix(policy_loss, value_loss,
-                                      moves_left_loss)
+                                      moves_left_loss)*mult
+                index += 1
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
         for policy, value, moves_left in outputs:
@@ -953,6 +994,7 @@ class TFProcess:
     def make_batch_norm(self, name, scale=False, group=False):
         if group:
             return tfa.layers.GroupNormalization(
+                    groups=2,
                     epsilon=1e-5,
                     axis=1,
                     center=True,
