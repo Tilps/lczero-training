@@ -30,6 +30,7 @@ import multiprocessing as mp
 import tensorflow as tf
 import logging
 from tfprocess import TFProcess
+from tfprocess import mix
 from policy_index import policy_index
 from timeit import default_timer as timer
 
@@ -44,6 +45,8 @@ def main(cmd):
     tfprocess.init_for_play()
 
     tfprocess.restore_v2(True)
+    for (swa, w) in zip(tfprocess.swa_weights, tfprocess.model.weights):
+        w.assign(swa.read_value())
 
     input_data = np.zeros((1,112,8,8), dtype=float)
     # pre heat the net by running an inference with empty input.
@@ -57,6 +60,7 @@ def main(cmd):
     recurse(hidden_state1)
     tfprocess.model.policy(hidden_state1, training=False)
     tfprocess.model.value(hidden_state1, training=False)
+    tfprocess.model.should_continue(hidden_state1, training=False)
 
     board = chess.Board()
 
@@ -71,7 +75,7 @@ def main(cmd):
             pos_start = timer()
             # update board and calculate input
             board.reset()
-            input_data = np.zeros((1,112,8,8), dtype=float)
+            input_data = np.zeros((1,112,8,8), dtype=np.float32)
             parts = instruction.split()
             started = False
             flip = len(parts) > 2 and len(parts) % 2 == 0
@@ -179,9 +183,15 @@ def main(cmd):
             # Do evil things that are not uci compliant... This loop should be on a different thread so it can be interrupted by stop.
             hidden_state1 = first(input_data)
             go_mid = timer()
+            sc = tfprocess.model.should_continue(hidden_state1)
             #print('timed {}'.format(go_mid-go_start))
+            count = 0
             for i in range(cmd.unroll):
-                hidden_state1 = recurse(hidden_state1)
+                if sc[0,0] > 0.999:
+                    break
+                count = i + 1
+                hidden_state1 = mix(hidden_state1, recurse(hidden_state1), sc)
+                sc = tfprocess.model.should_continue(hidden_state1)
             policy = tfprocess.model.policy(hidden_state1, training=False).numpy()
             bestmove = '0000'
             bestpolicy = None
@@ -204,7 +214,7 @@ def main(cmd):
             go_end = timer()
             q = value[0,0] - value[0,2]
             cp = int(90 * math.tan(1.5637541897 * q))
-            print('info depth 1 seldepth 1 time {} nodes {} score cp {} nps {} pv {} '.format(int((go_end-go_start)*1000), cmd.unroll + 1, cp, int((cmd.unroll + 1)/(go_end-go_start)), bestmove))
+            print('info depth 1 seldepth 1 time {} nodes {} score cp {} nps {} pv {} '.format(int((go_end-go_start)*1000), count + 1, cp, int((count + 1)/(go_end-go_start)), bestmove))
             print('bestmove {}'.format(bestmove))
         elif instruction == 'quit':
             return
