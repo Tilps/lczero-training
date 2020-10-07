@@ -57,7 +57,7 @@ class SqueezeExcitationLayer(tf.keras.layers.Layer):
             kernel_initializer='glorot_normal',
             kernel_regularizer=config_source.l2reg,
             name=name + '/se/dense1')
-        self.activation = tf.keras.layers.Activation('relu')
+        self.activation = tf.keras.layers.Activation(tf.nn.swish)
         self.dense2 = tf.keras.layers.Dense(2 * channels,
                                         kernel_initializer='glorot_normal',
                                         kernel_regularizer=config_source.l2reg,
@@ -83,7 +83,7 @@ class ConvBlockLayer(tf.keras.layers.Layer):
                                       data_format='channels_first',
                                       name=name + '/conv2d')
         self.batch_norm = config_source.make_batch_norm(name=name + '/bn', scale=bn_scale)
-        self.activation = tf.keras.layers.Activation('relu')
+        self.activation = tf.keras.layers.Activation(tf.nn.swish)
 
     def call(self, inputs, training=None):
         conved = self.conv(inputs)
@@ -102,7 +102,7 @@ class ResidualBlockLayer(tf.keras.layers.Layer):
                                       data_format='channels_first',
                                       name=name + '/1/conv2d')
         self.batch_norm1 = config_source.make_batch_norm(name=name + '/1/bn', scale=False, group=group)
-        self.activation = tf.keras.layers.Activation('relu')
+        self.activation = tf.keras.layers.Activation(tf.nn.swish)
         self.conv2 = tf.keras.layers.Conv2D(channels,
                                       3,
                                       use_bias=False,
@@ -193,7 +193,7 @@ class ValueHeadLayer(tf.keras.layers.Layer):
         self.dense1 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
                                       kernel_regularizer=config_source.l2reg,
-                                      activation='relu',
+                                      activation=tf.nn.swish,
                                       name=name+'/value/dense1')
         self.dense2 = tf.keras.layers.Dense(3,
                                           kernel_initializer='glorot_normal',
@@ -215,7 +215,7 @@ class MovesLeftHeadLayer(tf.keras.layers.Layer):
         self.dense1 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
                                       kernel_regularizer=config_source.l2reg,
-                                      activation='relu',
+                                      activation=tf.nn.swish,
                                       name=name+'/moves_left/dense1')
         self.dense2 = tf.keras.layers.Dense(1,
                                           kernel_initializer='glorot_normal',
@@ -237,7 +237,7 @@ class ShouldContinueHeadLayer(tf.keras.layers.Layer):
         self.dense1 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
                                       kernel_regularizer=config_source.l2reg,
-                                      activation='relu',
+                                      activation=tf.nn.swish,
                                       name=name+'/should_continue/dense1')
         self.dense2 = tf.keras.layers.Dense(1,
                                           kernel_initializer='glorot_normal',
@@ -368,8 +368,17 @@ class TFProcess:
     def init_for_play(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         self.model = RecursiveStackModel(self, name='model')
+        # Prime the model so its weights are available for setting up swa.
+        input_data = np.zeros((1,112,8,8), dtype=np.float32)
+        self.model(input_data)
+        self.swa_weights = None
+        if self.swa_enabled:
+            # Count of networks accumulated into SWA
+            self.swa_weights = [
+                tf.Variable(w, trainable=False) for w in self.model.weights
+            ]
         self.checkpoint = tf.train.Checkpoint(model=self.model)
-        #self.checkpoint.listed = self.swa_weights
+        self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
             self.checkpoint,
             directory=self.root_dir,
@@ -380,6 +389,9 @@ class TFProcess:
     def init_net_v2(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         self.model = RecursiveStackModel(self, name='model')
+        # Prime the model so its weights are available for setting up swa.
+        input_data = np.zeros((1,112,8,8), dtype=np.float32)
+        self.model(input_data)
 
         # swa_count initialized reguardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
