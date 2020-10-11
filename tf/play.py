@@ -155,7 +155,6 @@ def main(cmd):
                 for i in range(103, history_to_keep*13+12, -1):
                     input_data[0, i, :, :] = 0.0
                 
-            # TODO: finish implementing transform correctly.
             transform = 0
             if not board.has_castling_rights(True) and not board.has_castling_rights(False):
                 king_sq = board.pieces(chess.KING, not flip).pop()
@@ -171,7 +170,68 @@ def main(cmd):
                         king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
                     if king_sq // 8 > 7 - king_sq % 8:
                         transform |= 4
-                    # elif king_sq // 8 == 7 - king_sq % 8: the hard logic goes here...
+                    elif king_sq // 8 == 7 - king_sq % 8:
+                        def choose_transform(bitboard, transform, flip):
+                            if flip:
+                                bitboard = chess.flip_vertically(bitboard)
+                            if (transform & 1) != 0:
+                                bitboard = chess.flip_horizontally(bitboard)
+                            if (transform & 2) != 0:
+                                bitboard = chess.flip_vertically(bitboard)
+                            alternative = chess.flip_anti_diagonal(bitboard)
+                            if alternative < bitboard:
+                                return 1
+                            if alternative > bitboard:
+                                return -1
+                            return 0
+                        def should_transform_ad(board, transform, flip):
+                            allbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip)).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.KNIGHT, flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.BISHOP, flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.ROOK, flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.QUEEN, flip)).union(board.pieces(chess.KING, not flip)).union(board.pieces(chess.KING, flip)))
+                            outcome = choose_transform(allbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            stmbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.KING, not flip)))
+                            outcome = choose_transform(stmbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            kingbits = int(board.pieces(chess.KING, not flip).union(board.pieces(chess.KING, flip)))
+                            outcome = choose_transform(kingbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            queenbits = int(board.pieces(chess.QUEEN, not flip).union(board.pieces(chess.QUEEN, flip)))
+                            outcome = choose_transform(queenbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            rookbits = int(board.pieces(chess.ROOK, not flip).union(board.pieces(chess.ROOK, flip)))
+                            outcome = choose_transform(rookbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            knightbits = int(board.pieces(chess.KNIGHT, not flip).union(board.pieces(chess.KNIGHT, flip)))
+                            outcome = choose_transform(knightbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+                            bishopbits = int(board.pieces(chess.BISHOP, not flip).union(board.pieces(chess.BISHOP, flip)))
+                            outcome = choose_transform(bishopbits, transform, flip)
+                            if outcome == 1:
+                                return True
+                            if outcome == -1:
+                                return False
+
+                            return False
+                        if should_transform_ad(board, transform, flip):
+                            transform |= 4
+                        
             if transform != 0:
                 if (transform & 1) != 0:
                     np.flip(input_data, 3)
