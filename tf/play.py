@@ -64,6 +64,21 @@ def main(cmd):
             started = False
             flip = len(parts) > 2 and len(parts) % 2 == 0
             last_enpassant_hist_depth = 100
+            last_castling_rights_change_hist_depth = 100
+
+            def castling_rights(board):
+                result = 0
+                if board.has_queenside_castling_rights(True):
+                    result |= 1
+                if board.has_queenside_castling_rights(False):
+                    result |= 2
+                if board.has_kingside_castling_rights(True):
+                    result |= 4
+                if board.has_kingside_castling_rights(False):
+                    result |= 8
+                return result
+            
+            cur_castling_rights = castling_rights(board)
             for i in range(len(parts)):
                 if started:
                     hist_depth = len(parts) - i
@@ -84,6 +99,9 @@ def main(cmd):
                         if board.has_legal_en_passant():
                             last_enpassant_hist_depth = hist_depth
                     board.push_uci(parts[i])
+                    if cur_castling_rights != castling_rights(board):
+                        last_castling_rights_change_hist_depth = hist_depth
+                    cur_castling_rights = castling_rights(board)
                 if parts[i] == 'moves':
                     started = True
             for j in range(6):
@@ -128,10 +146,11 @@ def main(cmd):
             #if flip:
             #    input_data[0, 110, :, :] = 1.0
             input_data[0, 111, :, :] = 1.0
-            # TODO: Correct history_to_keep for castling rights change.
             history_to_keep = board.halfmove_clock
             if last_enpassant_hist_depth - 1 < history_to_keep:
                 history_to_keep = last_enpassant_hist_depth - 1
+            if last_castling_rights_change_hist_depth - 1 < history_to_keep:
+                history_to_keep = last_castling_rights_change_hist_depth - 1
             if history_to_keep < 7:
                 for i in range(103, history_to_keep*13+12, -1):
                     input_data[0, i, :, :] = 0.0
