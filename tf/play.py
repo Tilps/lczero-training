@@ -138,8 +138,8 @@ def main(cmd):
                 sq = board.ep_square
                 input_data[0, 108, 7, sq % 8] = 1.0
             input_data[0, 109, :, :] = board.halfmove_clock / 100.0
-            if flip:
-                input_data[0, 110, :, :] = 1.0
+            #if flip:
+            #    input_data[0, 110, :, :] = 1.0
             input_data[0, 111, :, :] = 1.0
             # TODO: Correct history_to_keep for castling rights change, and passing of en-passant rights.
             history_to_keep = board.halfmove_clock
