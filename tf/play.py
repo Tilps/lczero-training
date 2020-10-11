@@ -63,6 +63,7 @@ def main(cmd):
             parts = instruction.split()
             started = False
             flip = len(parts) > 2 and len(parts) % 2 == 0
+            last_enpassant_hist_depth = 100
             for i in range(len(parts)):
                 if started:
                     hist_depth = len(parts) - i
@@ -80,6 +81,8 @@ def main(cmd):
                                 input_data[0, hist_depth*13+j+6, row, sq % 8] = 1.0
                         if board.is_repetition(2):
                             input_data[0, hist_depth*13+12,:,:] = 1.0
+                        if board.has_legal_en_passant():
+                            last_enpassant_hist_depth = hist_depth
                     board.push_uci(parts[i])
                 if parts[i] == 'moves':
                     started = True
@@ -125,8 +128,10 @@ def main(cmd):
             #if flip:
             #    input_data[0, 110, :, :] = 1.0
             input_data[0, 111, :, :] = 1.0
-            # TODO: Correct history_to_keep for castling rights change, and passing of en-passant rights.
+            # TODO: Correct history_to_keep for castling rights change.
             history_to_keep = board.halfmove_clock
+            if last_enpassant_hist_depth - 1 < history_to_keep:
+                history_to_keep = last_enpassant_hist_depth - 1
             if history_to_keep < 7:
                 for i in range(103, history_to_keep*13+12, -1):
                     input_data[0, i, :, :] = 0.0
