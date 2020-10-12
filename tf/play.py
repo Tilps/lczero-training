@@ -38,13 +38,16 @@ def main(cmd):
     def first(input_data):
         return tfprocess.model.first(input_data, training=False)
     @tf.function
-    def recurse(input_data):
-        return tfprocess.model.recursive(input_data, training=False)
+    def sc_data(input_data):
+        return tfprocess.model.should_continue(input_data, training=False)
+    @tf.function
+    def recurse(input_data, sc):
+        return mix(input_data, tfprocess.model.recursive(input_data, training=False), sc)
     hidden_state1 = first(input_data)
-    recurse(hidden_state1)
+    sc = sc_data(hidden_state1)
+    recurse(hidden_state1, sc)
     tfprocess.model.policy(hidden_state1, training=False)
     tfprocess.model.value(hidden_state1, training=False)
-    tfprocess.model.should_continue(hidden_state1, training=False)
 
     board = chess.Board()
 
@@ -251,15 +254,15 @@ def main(cmd):
             # Do evil things that are not uci compliant... This loop should be on a different thread so it can be interrupted by stop.
             hidden_state1 = first(input_data)
             go_mid = timer()
-            sc = tfprocess.model.should_continue(hidden_state1)
+            sc = sc_data(hidden_state1)
             #print('timed {}'.format(go_mid-go_start))
             count = 0
             for i in range(cmd.unroll):
                 if sc[0,0] > 0.999:
                     break
                 count = i + 1
-                hidden_state1 = mix(hidden_state1, recurse(hidden_state1), sc)
-                sc = tfprocess.model.should_continue(hidden_state1)
+                hidden_state1 = recurse(hidden_state1, sc)
+                sc = sc_data(hidden_state1)
             policy = tfprocess.model.policy(hidden_state1, training=False).numpy()
             bestmove = '0000'
             bestpolicy = None
