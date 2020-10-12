@@ -173,11 +173,11 @@ def main(cmd):
                     elif king_sq // 8 == 7 - king_sq % 8:
                         def choose_transform(bitboard, transform, flip):
                             if flip:
-                                bitboard = chess.flip_vertically(bitboard)
+                                bitboard = chess.flip_vertical(bitboard)
                             if (transform & 1) != 0:
-                                bitboard = chess.flip_horizontally(bitboard)
+                                bitboard = chess.flip_horizontal(bitboard)
                             if (transform & 2) != 0:
-                                bitboard = chess.flip_vertically(bitboard)
+                                bitboard = chess.flip_vertical(bitboard)
                             alternative = chess.flip_anti_diagonal(bitboard)
                             if alternative < bitboard:
                                 return 1
