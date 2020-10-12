@@ -18,6 +18,193 @@ from tfprocess import mix
 from policy_index import policy_index
 from timeit import default_timer as timer
 
+def calculate_input(instruction, board):
+    # update board and calculate input
+    board.reset()
+    input_data = np.zeros((1,112,8,8), dtype=np.float32)
+    parts = instruction.split()
+    started = False
+    flip = len(parts) > 2 and len(parts) % 2 == 0
+    last_enpassant_hist_depth = 100
+    last_castling_rights_change_hist_depth = 100
+
+    def castling_rights(board):
+        result = 0
+        if board.has_queenside_castling_rights(True):
+            result |= 1
+        if board.has_queenside_castling_rights(False):
+            result |= 2
+        if board.has_kingside_castling_rights(True):
+            result |= 4
+        if board.has_kingside_castling_rights(False):
+            result |= 8
+        return result
+    
+    cur_castling_rights = castling_rights(board)
+    for i in range(len(parts)):
+        if started:
+            hist_depth = len(parts) - i
+            if hist_depth <= 7:
+                for j in range(6):
+                    for sq in board.pieces(j+1, not flip):
+                        row = sq // 8
+                        if flip:
+                            row = 7 - row
+                        input_data[0, hist_depth*13+j, row, sq % 8] = 1.0
+                    for sq in board.pieces(j+1, flip):
+                        row = sq // 8
+                        if flip:
+                            row = 7 - row
+                        input_data[0, hist_depth*13+j+6, row, sq % 8] = 1.0
+                if board.is_repetition(2):
+                    input_data[0, hist_depth*13+12,:,:] = 1.0
+                if board.has_legal_en_passant():
+                    last_enpassant_hist_depth = hist_depth
+            board.push_uci(parts[i])
+            if cur_castling_rights != castling_rights(board):
+                last_castling_rights_change_hist_depth = hist_depth
+            cur_castling_rights = castling_rights(board)
+        if parts[i] == 'moves':
+            started = True
+    for j in range(6):
+        for sq in board.pieces(j+1, not flip):
+            row = sq // 8
+            if flip:
+                row = 7 - row
+            input_data[0, j, row, sq % 8] = 1.0
+        for sq in board.pieces(j+1, flip):
+            row = sq // 8
+            if flip:
+                row = 7 - row
+            input_data[0, j+6, row, sq % 8] = 1.0
+    if board.is_repetition(2):
+        input_data[0, 12,:,:] = 1.0
+    
+    # chess 960 castling, but without the chess960 support...
+    if board.has_queenside_castling_rights(True):
+        row = 0
+        if flip:
+            row = 7 - row
+        input_data[0, 104, row, 0] = 1.0
+    if board.has_queenside_castling_rights(False):
+        row = 7
+        if flip:
+            row = 7 - row
+        input_data[0, 104, row, 0] = 1.0
+    if board.has_kingside_castling_rights(True):
+        row = 0
+        if flip:
+            row = 7 - row
+        input_data[0, 105, row, 7] = 1.0
+    if board.has_kingside_castling_rights(False):
+        row = 7
+        if flip:
+            row = 7 - row
+        input_data[0, 105, row, 7] = 1.0
+    if board.has_legal_en_passant():
+        sq = board.ep_square
+        input_data[0, 108, 7, sq % 8] = 1.0
+    input_data[0, 109, :, :] = board.halfmove_clock / 100.0
+    #if flip:
+    #    input_data[0, 110, :, :] = 1.0
+    input_data[0, 111, :, :] = 1.0
+    history_to_keep = board.halfmove_clock
+    if last_enpassant_hist_depth - 1 < history_to_keep:
+        history_to_keep = last_enpassant_hist_depth - 1
+    if last_castling_rights_change_hist_depth - 1 < history_to_keep:
+        history_to_keep = last_castling_rights_change_hist_depth - 1
+    if history_to_keep < 7:
+        for i in range(103, history_to_keep*13+12, -1):
+            input_data[0, i, :, :] = 0.0
+        
+    transform = 0
+    if not board.has_castling_rights(True) and not board.has_castling_rights(False):
+        king_sq = board.pieces(chess.KING, not flip).pop()
+        if flip:
+            king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
+
+        if king_sq % 8 < 4:
+            transform |= 1
+            king_sq = king_sq + (7 - 2*(king_sq % 8))
+        if len(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip))) == 0:
+            if king_sq // 8 >= 4:
+                transform |= 2
+                king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
+            if king_sq // 8 > 7 - king_sq % 8:
+                transform |= 4
+            elif king_sq // 8 == 7 - king_sq % 8:
+                def choose_transform(bitboard, transform, flip):
+                    if flip:
+                        bitboard = chess.flip_vertical(bitboard)
+                    if (transform & 1) != 0:
+                        bitboard = chess.flip_horizontal(bitboard)
+                    if (transform & 2) != 0:
+                        bitboard = chess.flip_vertical(bitboard)
+                    alternative = chess.flip_anti_diagonal(bitboard)
+                    if alternative < bitboard:
+                        return 1
+                    if alternative > bitboard:
+                        return -1
+                    return 0
+                def should_transform_ad(board, transform, flip):
+                    allbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip)).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.KNIGHT, flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.BISHOP, flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.ROOK, flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.QUEEN, flip)).union(board.pieces(chess.KING, not flip)).union(board.pieces(chess.KING, flip)))
+                    outcome = choose_transform(allbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    stmbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.KING, not flip)))
+                    outcome = choose_transform(stmbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    kingbits = int(board.pieces(chess.KING, not flip).union(board.pieces(chess.KING, flip)))
+                    outcome = choose_transform(kingbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    queenbits = int(board.pieces(chess.QUEEN, not flip).union(board.pieces(chess.QUEEN, flip)))
+                    outcome = choose_transform(queenbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    rookbits = int(board.pieces(chess.ROOK, not flip).union(board.pieces(chess.ROOK, flip)))
+                    outcome = choose_transform(rookbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    knightbits = int(board.pieces(chess.KNIGHT, not flip).union(board.pieces(chess.KNIGHT, flip)))
+                    outcome = choose_transform(knightbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+                    bishopbits = int(board.pieces(chess.BISHOP, not flip).union(board.pieces(chess.BISHOP, flip)))
+                    outcome = choose_transform(bishopbits, transform, flip)
+                    if outcome == 1:
+                        return True
+                    if outcome == -1:
+                        return False
+
+                    return False
+                if should_transform_ad(board, transform, flip):
+                    transform |= 4
+                
+    if transform != 0:
+        if (transform & 1) != 0:
+            np.flip(input_data, 3)
+        if (transform & 2) != 0:
+            np.flip(input_data, 2)
+        if (transform & 4) != 0:
+            np.transpose(input_data, (0, 1, 3, 2))
+            np.flip(input_data, 2)
+            np.flip(input_data, 3)
+    return input_data, flip
+
 
 def main(cmd):
     tf.get_logger().setLevel(logging.ERROR)
@@ -32,8 +219,9 @@ def main(cmd):
     for (swa, w) in zip(tfprocess.swa_weights, tfprocess.model.weights):
         w.assign(swa.read_value())
 
-    input_data = np.zeros((1,112,8,8), dtype=float)
-    # pre heat the net by running an inference with empty input.
+    board = chess.Board()
+
+    # pre heat the net by running an inference with startpos input.
     @tf.function
     def first(input_data):
         return tfprocess.model.first(input_data, training=False)
@@ -43,13 +231,14 @@ def main(cmd):
     @tf.function
     def recurse(input_data, sc):
         return mix(input_data, tfprocess.model.recursive(input_data, training=False), sc)
+
+    input_data, flip = calculate_input('position startpos', board)
+
     hidden_state1 = first(input_data)
     sc = sc_data(hidden_state1)
     recurse(hidden_state1, sc)
     tfprocess.model.policy(hidden_state1, training=False)
     tfprocess.model.value(hidden_state1, training=False)
-
-    board = chess.Board()
 
 
     while True:
@@ -60,194 +249,9 @@ def main(cmd):
             print('uciok')
         elif instruction.startswith('position '):
             pos_start = timer()
-            # update board and calculate input
-            board.reset()
-            input_data = np.zeros((1,112,8,8), dtype=np.float32)
-            parts = instruction.split()
-            started = False
-            flip = len(parts) > 2 and len(parts) % 2 == 0
-            last_enpassant_hist_depth = 100
-            last_castling_rights_change_hist_depth = 100
-
-            def castling_rights(board):
-                result = 0
-                if board.has_queenside_castling_rights(True):
-                    result |= 1
-                if board.has_queenside_castling_rights(False):
-                    result |= 2
-                if board.has_kingside_castling_rights(True):
-                    result |= 4
-                if board.has_kingside_castling_rights(False):
-                    result |= 8
-                return result
-            
-            cur_castling_rights = castling_rights(board)
-            for i in range(len(parts)):
-                if started:
-                    hist_depth = len(parts) - i
-                    if hist_depth <= 7:
-                        for j in range(6):
-                            for sq in board.pieces(j+1, not flip):
-                                row = sq // 8
-                                if flip:
-                                    row = 7 - row
-                                input_data[0, hist_depth*13+j, row, sq % 8] = 1.0
-                            for sq in board.pieces(j+1, flip):
-                                row = sq // 8
-                                if flip:
-                                    row = 7 - row
-                                input_data[0, hist_depth*13+j+6, row, sq % 8] = 1.0
-                        if board.is_repetition(2):
-                            input_data[0, hist_depth*13+12,:,:] = 1.0
-                        if board.has_legal_en_passant():
-                            last_enpassant_hist_depth = hist_depth
-                    board.push_uci(parts[i])
-                    if cur_castling_rights != castling_rights(board):
-                        last_castling_rights_change_hist_depth = hist_depth
-                    cur_castling_rights = castling_rights(board)
-                if parts[i] == 'moves':
-                    started = True
-            for j in range(6):
-                for sq in board.pieces(j+1, not flip):
-                    row = sq // 8
-                    if flip:
-                        row = 7 - row
-                    input_data[0, j, row, sq % 8] = 1.0
-                for sq in board.pieces(j+1, flip):
-                    row = sq // 8
-                    if flip:
-                        row = 7 - row
-                    input_data[0, j+6, row, sq % 8] = 1.0
-            if board.is_repetition(2):
-                input_data[0, 12,:,:] = 1.0
-            
-            # chess 960 castling, but without the chess960 support...
-            if board.has_queenside_castling_rights(True):
-                row = 0
-                if flip:
-                    row = 7 - row
-                input_data[0, 104, row, 0] = 1.0
-            if board.has_queenside_castling_rights(False):
-                row = 7
-                if flip:
-                    row = 7 - row
-                input_data[0, 104, row, 0] = 1.0
-            if board.has_kingside_castling_rights(True):
-                row = 0
-                if flip:
-                    row = 7 - row
-                input_data[0, 105, row, 7] = 1.0
-            if board.has_kingside_castling_rights(False):
-                row = 7
-                if flip:
-                    row = 7 - row
-                input_data[0, 105, row, 7] = 1.0
-            if board.has_legal_en_passant():
-                sq = board.ep_square
-                input_data[0, 108, 7, sq % 8] = 1.0
-            input_data[0, 109, :, :] = board.halfmove_clock / 100.0
-            #if flip:
-            #    input_data[0, 110, :, :] = 1.0
-            input_data[0, 111, :, :] = 1.0
-            history_to_keep = board.halfmove_clock
-            if last_enpassant_hist_depth - 1 < history_to_keep:
-                history_to_keep = last_enpassant_hist_depth - 1
-            if last_castling_rights_change_hist_depth - 1 < history_to_keep:
-                history_to_keep = last_castling_rights_change_hist_depth - 1
-            if history_to_keep < 7:
-                for i in range(103, history_to_keep*13+12, -1):
-                    input_data[0, i, :, :] = 0.0
-                
-            transform = 0
-            if not board.has_castling_rights(True) and not board.has_castling_rights(False):
-                king_sq = board.pieces(chess.KING, not flip).pop()
-                if flip:
-                    king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
-
-                if king_sq % 8 < 4:
-                    transform |= 1
-                    king_sq = king_sq + (7 - 2*(king_sq % 8))
-                if len(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip))) == 0:
-                    if king_sq // 8 >= 4:
-                        transform |= 2
-                        king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
-                    if king_sq // 8 > 7 - king_sq % 8:
-                        transform |= 4
-                    elif king_sq // 8 == 7 - king_sq % 8:
-                        def choose_transform(bitboard, transform, flip):
-                            if flip:
-                                bitboard = chess.flip_vertical(bitboard)
-                            if (transform & 1) != 0:
-                                bitboard = chess.flip_horizontal(bitboard)
-                            if (transform & 2) != 0:
-                                bitboard = chess.flip_vertical(bitboard)
-                            alternative = chess.flip_anti_diagonal(bitboard)
-                            if alternative < bitboard:
-                                return 1
-                            if alternative > bitboard:
-                                return -1
-                            return 0
-                        def should_transform_ad(board, transform, flip):
-                            allbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip)).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.KNIGHT, flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.BISHOP, flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.ROOK, flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.QUEEN, flip)).union(board.pieces(chess.KING, not flip)).union(board.pieces(chess.KING, flip)))
-                            outcome = choose_transform(allbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            stmbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.KING, not flip)))
-                            outcome = choose_transform(stmbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            kingbits = int(board.pieces(chess.KING, not flip).union(board.pieces(chess.KING, flip)))
-                            outcome = choose_transform(kingbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            queenbits = int(board.pieces(chess.QUEEN, not flip).union(board.pieces(chess.QUEEN, flip)))
-                            outcome = choose_transform(queenbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            rookbits = int(board.pieces(chess.ROOK, not flip).union(board.pieces(chess.ROOK, flip)))
-                            outcome = choose_transform(rookbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            knightbits = int(board.pieces(chess.KNIGHT, not flip).union(board.pieces(chess.KNIGHT, flip)))
-                            outcome = choose_transform(knightbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-                            bishopbits = int(board.pieces(chess.BISHOP, not flip).union(board.pieces(chess.BISHOP, flip)))
-                            outcome = choose_transform(bishopbits, transform, flip)
-                            if outcome == 1:
-                                return True
-                            if outcome == -1:
-                                return False
-
-                            return False
-                        if should_transform_ad(board, transform, flip):
-                            transform |= 4
-                        
-            if transform != 0:
-                if (transform & 1) != 0:
-                    np.flip(input_data, 3)
-                if (transform & 2) != 0:
-                    np.flip(input_data, 2)
-                if (transform & 4) != 0:
-                    np.transpose(input_data, (0, 1, 3, 2))
-                    np.flip(input_data, 2)
-                    np.flip(input_data, 3)
+            input_data, flip = calculate_input(instruction, board)
             pos_end = timer()
             #print('timed {}'.format(pos_end-pos_start))
-            
-
 
         elif instruction.startswith('go '):
             go_start = timer()
