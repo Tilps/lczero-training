@@ -440,7 +440,20 @@ class TFProcess:
 
         self.policy_accuracy_fn = policy_accuracy
 
-        self.policy_accuracy_fn = policy_accuracy
+        def policy_semi_accuracy(target, output):
+            target, output = correct_policy(target, output)
+            target_softmax = tf.nn.softmax(target)
+            max_vals = tf.math.reduce_max(target_softmax, axis=1, keepdims=True)
+            suitables = tf.math.greater(target_softmax, max_vals/2.0)
+            output_softmax = tf.nn.softmax(output)
+            max_outs = tf.math.reduce_max(output_softmax, axis=1, keepdims=True)
+            out_max = tf.math.equal(output_softmax, max_outs)
+            truth = tf.math.logical_and(out_max, suitables)
+            
+            return tf.reduce_mean(
+                tf.reduce_max(tf.cast(truth, tf.float32), axis=1))
+
+        self.policy_semi_accuracy_fn = policy_semi_accuracy
 
         def moves_left_mean_error_fn(target, output):
             output = tf.cast(output, tf.float32)
@@ -794,6 +807,7 @@ class TFProcess:
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         policy_losses = []
         policy_accuracies = []
+        policy_semi_accuracies = []
         policy_entropies = []
         policy_uls = []
         value_losses = []
@@ -805,6 +819,7 @@ class TFProcess:
         for policy, value, moves_left in outputs:
             policy_loss = self.policy_loss_fn(y, policy)
             policy_accuracy = self.policy_accuracy_fn(y, policy)
+            policy_semi_accuracy = self.policy_semi_accuracy_fn(y, policy)
             policy_entropy = self.policy_entropy_fn(y, policy)
             policy_ul = self.policy_uniform_loss_fn(y, policy)
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
@@ -814,6 +829,7 @@ class TFProcess:
             moves_left_mean_error = self.moves_left_mean_error(m, moves_left)
             policy_losses.append(policy_loss)
             policy_accuracies.append(policy_accuracy)
+            policy_semi_accuracies.append(policy_semi_accuracy)
             policy_entropies.append(policy_entropy)
             policy_uls.append(policy_ul)
             value_losses.append(value_loss)
@@ -822,10 +838,11 @@ class TFProcess:
             moves_left_losses.append(moves_left_loss)
             moves_left_mean_errors.append(moves_left_mean_error)
 
-        return policy_losses, value_losses, moves_left_losses, mse_losses, policy_accuracies, value_accuracies, moves_left_mean_errors, policy_entropies, policy_uls
+        return policy_losses, value_losses, moves_left_losses, mse_losses, policy_accuracies, policy_semi_accuracies, value_accuracies, moves_left_mean_errors, policy_entropies, policy_uls
 
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = []
+        sum_policy_semi_accuracy = []
         sum_value_accuracy = []
         sum_moves_left = []
         sum_moves_left_mean_error = []
@@ -836,9 +853,10 @@ class TFProcess:
         sum_policy_ul = []
         for _ in range(0, test_batches):
             x, y, z, q, m = next(self.test_iter)
-            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, policy_semi_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
                 x, y, z, q, m)
             sum_policy_accuracy.append(policy_accuracy)
+            sum_policy_semi_accuracy.append(policy_semi_accuracy)
             sum_policy_entropy.append(policy_entropy)
             sum_policy_ul.append(policy_ul)
             sum_mse.append(mse_loss)
@@ -848,6 +866,7 @@ class TFProcess:
             sum_moves_left.append(moves_left_loss)
             sum_moves_left_mean_error.append(moves_left_mean_error)
         sum_policy_accuracy = np.mean(sum_policy_accuracy, axis=0)
+        sum_policy_semi_accuracy = np.mean(sum_policy_semi_accuracy, axis=0)
         sum_value_accuracy = np.mean(sum_value_accuracy, axis=0)
         sum_moves_left = np.mean(sum_moves_left, axis=0)
         sum_moves_left_mean_error = np.mean(sum_moves_left_mean_error, axis=0)
@@ -865,6 +884,9 @@ class TFProcess:
                 tf.summary.scalar("Policy Accuracy {}".format(i),
                                   sum_policy_accuracy[i],
                                   step=steps)
+                tf.summary.scalar("Policy SemiAccuracy {}".format(i),
+                                  sum_policy_semi_accuracy[i],
+                                  step=steps)
                 tf.summary.scalar("Policy Entropy {}".format(i), sum_policy_entropy[i], step=steps)
                 tf.summary.scalar("Policy UL {}".format(i), sum_policy_ul[i], step=steps)
                 tf.summary.scalar("Value Accuracy {}".format(i),
@@ -881,8 +903,8 @@ class TFProcess:
         self.test_writer.flush()
 
         for i in range(len(sum_policy)):
-            print("step {} depth {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g} moves={:g} moves mean={:g}".\
-                format(steps, i, sum_policy[i], sum_value[i], sum_policy_accuracy[i], sum_value_accuracy[i], sum_mse[i], sum_policy_entropy[i], sum_policy_ul[i], sum_moves_left[i], sum_moves_left_mean_error[i]))
+            print("step {} depth {}, policy={:g} value={:g} policy accuracy={:g}% policy semiaccuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g} moves={:g} moves mean={:g}".\
+                format(steps, i, sum_policy[i], sum_value[i], sum_policy_accuracy[i], sum_policy_semi_accuracy[i], sum_value_accuracy[i], sum_mse[i], sum_policy_entropy[i], sum_policy_ul[i], sum_moves_left[i], sum_moves_left_mean_error[i]))
 
     def calculate_swa_validations_v2(self, steps):
         backup = self.read_weights()
@@ -897,6 +919,7 @@ class TFProcess:
 
     def calculate_test_validations_v2(self, steps):
         sum_policy_accuracy = 0
+        sum_policy_semi_accuracy = 0
         sum_value_accuracy = 0
         sum_moves_left = 0
         sum_moves_left_mean_error = 0
@@ -907,9 +930,10 @@ class TFProcess:
         sum_policy_ul = 0
         counter = 0
         for (x, y, z, q, m) in self.validation_dataset:
-            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, policy_semi_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
                 x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
+            sum_policy_semi_accuracy += policy_semi_accuracy
             sum_policy_entropy += policy_entropy
             sum_policy_ul += policy_ul
             sum_mse += mse_loss
@@ -923,6 +947,8 @@ class TFProcess:
                 sum_value += value_loss
         sum_policy_accuracy /= counter
         sum_policy_accuracy *= 100
+        sum_policy_semi_accuracy /= counter
+        sum_policy_semi_accuracy *= 100
         sum_policy /= counter
         sum_policy_entropy /= counter
         sum_policy_ul /= counter
