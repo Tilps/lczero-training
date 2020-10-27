@@ -37,9 +37,16 @@ def get_chunks(data_prefix):
 
 
 def get_all_chunks(path):
+    if isinstance(path, list):
+        print("getting chunks for", path)
+        chunks = []
+        for i in path:
+            chunks += get_all_chunks(i)
+        return chunks
     chunks = []
     for d in glob.glob(path):
         chunks += get_chunks(d)
+    print("got", len(chunks),"chunks for", path)
     return chunks
 
 
