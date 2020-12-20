@@ -222,6 +222,9 @@ def extract_inputs_outputs_if4(raw):
 
     policy = extract_policy(raw)
 
+    occupency_policy_offset = tf.tile(tf.reduce_max(bit_planes, axis=1, keepdims=True), [1, 128, 1, 1])
+    policy = policy - tf.reshape(occupency_policy_offset, [-1, 128*8*8])
+
     m, r, b = extract_outputs(raw, zero_plane)
 
     return (inputs, policy, m, r, b)
