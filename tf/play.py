@@ -8,6 +8,7 @@ import glob
 import gzip
 import random
 import chess
+import chess.pgn
 import math
 import numpy as np
 import multiprocessing as mp
@@ -17,6 +18,7 @@ from tfprocess import TFProcess
 from timeit import default_timer as timer
 
 def calculate_input(instruction, board):
+    print('received:', instruction)
     # update board and calculate input
     board.reset()
     input_data = np.zeros((1,24,8,8), dtype=np.float32)
@@ -58,35 +60,36 @@ def calculate_input(instruction, board):
             if flip:
                 row = 7 - row
             input_data[0, j+6, row, sq % 8] = 1.0
-    
-    # chess 960 castling, but without the chess960 support...
-    if board.has_queenside_castling_rights(True):
-        row = 0
-        if flip:
-            row = 7 - row
-        input_data[0, 12, row, 0] = 1.0
-    if board.has_queenside_castling_rights(False):
-        row = 7
-        if flip:
-            row = 7 - row
-        input_data[0, 12, row, 0] = 1.0
-    if board.has_kingside_castling_rights(True):
-        row = 0
-        if flip:
-            row = 7 - row
-        input_data[0, 13, row, 7] = 1.0
-    if board.has_kingside_castling_rights(False):
-        row = 7
-        if flip:
-            row = 7 - row
-        input_data[0, 13, row, 7] = 1.0
-    if board.has_legal_en_passant():
-        sq = board.ep_square
-        input_data[0, 16, 7, sq % 8] = 1.0
-    input_data[0, 17, :, :] = board.halfmove_clock / 100.0
-    # TODO: Allow to depopultae some of the inputs.
-    for i in range(18, 24):
-        input_data[0, i, :, :] = 1.0
+
+    # This section commented out until there is smarter logic about when to enable or disable this information provided to the net.    
+##    # chess 960 castling, but without the chess960 support...
+##    if board.has_queenside_castling_rights(True):
+##        row = 0
+##        if flip:
+##            row = 7 - row
+##        input_data[0, 12, row, 0] = 1.0
+##    if board.has_queenside_castling_rights(False):
+##        row = 7
+##        if flip:
+##            row = 7 - row
+##        input_data[0, 12, row, 0] = 1.0
+##    if board.has_kingside_castling_rights(True):
+##        row = 0
+##        if flip:
+##            row = 7 - row
+##        input_data[0, 13, row, 7] = 1.0
+##    if board.has_kingside_castling_rights(False):
+##        row = 7
+##        if flip:
+##            row = 7 - row
+##        input_data[0, 13, row, 7] = 1.0
+##    if board.has_legal_en_passant():
+##        sq = board.ep_square
+##        input_data[0, 16, 7, sq % 8] = 1.0
+##    input_data[0, 17, :, :] = board.halfmove_clock / 100.0
+##    # TODO: Allow to depopultae some of the inputs.
+##    for i in range(18, 24):
+##        input_data[0, i, :, :] = 1.0
     if flip:
         input_data[0, 14, :, :] = 1.0
 
@@ -129,6 +132,8 @@ def main(cmd):
 
     outputs = first(input_data)
 
+    reco_moves = []
+
     while True:
         instruction = input()
         if instruction == 'uci':
@@ -136,6 +141,7 @@ def main(cmd):
             print('id author Reverser Authors')
             print('uciok')
         elif instruction.startswith('position '):
+            reco_moves = []
             pos_start = timer()
             input_data, flip = calculate_input(instruction, board)
             pos_end = timer()
@@ -173,9 +179,9 @@ def main(cmd):
             print()
             print('Max Policy value:',max_value,'index:',max_idx)
             print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
-            sq = reverseTransformSq(max_idx % 64, flip)
-            row = sq // 8
-            col = sq % 8
+            from_sq = reverseTransformSq(max_idx % 64, flip)
+            row = from_sq // 8
+            col = from_sq % 8
             print('Square:',"abcdefgh"[col]+"12345678"[row])
             move_type = max_idx // 64
             if move_type < 48:
@@ -203,6 +209,24 @@ def main(cmd):
                 to_row = row - y_delta
                 to_col = col - x_delta
                 print('KnightMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+                sq = to_row*8+to_col
+                piece_moved = board.remove_piece_at(sq)
+                if piece_moved is None:
+                    print('Illegal KnightMove')
+                board.set_piece_at(from_sq, piece_moved)
+                if cap_type == 1:
+                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 2:
+                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 3:
+                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 4:
+                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 5:
+                    board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+                board.turn = chess.WHITE if flip else chess.BLACK
+                input_data, flip = calculate_input('position fen '+board.fen(), board)
+                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
             elif move_type < 96:
                 direction = (move_type-48) // 6
                 cap_type = (move_type-48) % 6
@@ -227,16 +251,52 @@ def main(cmd):
                 x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
                 to_row = row - y_delta
                 to_col = col - x_delta
-                print('SlideMove','Towards:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+                while True:
+                    if to_row < 0 or to_row > 7 or to_col < 0 or to_col > 7:
+                        print('Illegal slide')
+                        break
+                    sq = to_row*8+to_col
+                    if board.piece_at(sq) is not None:
+                        break
+                    to_row = to_row - y_delta
+                    to_col = to_col - x_delta
+                sq = to_row*8+to_col
+                print('SlideMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+                piece_moved = board.remove_piece_at(sq)
+                if piece_moved is None:
+                    print('Illegal slide')
+                board.set_piece_at(from_sq, piece_moved)
+                if cap_type == 1:
+                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 2:
+                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 3:
+                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 4:
+                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 5:
+                    board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+                board.turn = chess.WHITE if flip else chess.BLACK
+                input_data, flip = calculate_input('position fen '+board.fen(), board)
+                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
             elif move_type < 98:
                 x_delta = -1
-                y_delta = 0
+                y_delta = 1
                 if move_type == 97:
                     x_delta = 1
                 x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
                 to_row = row - y_delta
                 to_col = col - x_delta
+                sq = to_row*8+to_col
                 print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
+                piece_moved = board.remove_piece_at(sq)
+                if piece_moved is None:
+                    print('Illegal enpassant')
+                board.set_piece_at(from_sq, piece_moved)
+                board.set_piece_at(row*8+to_col, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+                board.turn = chess.WHITE if flip else chess.BLACK
+                input_data, flip = calculate_input('position fen '+board.fen(), board)
+                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
             elif move_type < 106:
                 # TODO: support 960
                 y_delta = 0
@@ -249,10 +309,29 @@ def main(cmd):
                 x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
                 if x_delta > 0:
                     print('Castling, O-O')
+                    piece_moved = board.remove_piece_at(row*8+6)
+                    if piece_moved is None:
+                        print('Illegal castling')
+                    board.set_piece_at(from_sq, piece_moved)
+                    piece_moved = board.remove_piece_at(row*8+5)
+                    if piece_moved is None:
+                        print('Illegal castling')
+                    board.set_piece_at(row*8+7, piece_moved)
                 else:
                     print('Castling, O-O-O')
+                    piece_moved = board.remove_piece_at(row*8+2)
+                    if piece_moved is None:
+                        print('Illegal castling')
+                    board.set_piece_at(from_sq, piece_moved)
+                    piece_moved = board.remove_piece_at(row*8+3)
+                    if piece_moved is None:
+                        print('Illegal castling')
+                    board.set_piece_at(row*8, piece_moved)
+                board.turn = chess.WHITE if flip else chess.BLACK
+                input_data, flip = calculate_input('position fen '+board.fen(), board)
+                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[7 if x_delta > 0 else 0]+"12345678"[row])
             elif move_type < 117:
-                y_delta = -1
+                y_delta = 1
                 if move_type == 106:
                     x_delta = 0
                 elif move_type < 112:
@@ -264,10 +343,32 @@ def main(cmd):
                 x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
                 to_row = row - y_delta
                 to_col = col - x_delta
+                sq = to_row*8+to_col
                 print('Promotion','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+                piece_moved = board.remove_piece_at(sq)
+                if piece_moved is None:
+                    print('Illegal promotion')
+                board.set_piece_at(from_sq, chess.Piece(chess.PAWN, chess.WHITE if flip else chess.BLACK))
+                if cap_type == 1:
+                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 2:
+                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 3:
+                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+                elif cap_type == 4:
+                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+                board.turn = chess.WHITE if flip else chess.BLACK
+                input_data, flip = calculate_input('position fen '+board.fen(), board)
+                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]+piece_moved.symbol().lower())
             print('Moves from start:',moves[0,0])
             print('Rule 50 est:',r50_est[0,0])
             bestmove = '0000'
+            print('Recomoves:',list(reversed(reco_moves)))
+            if board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR":
+                board.reset()
+                for uci_move in reversed(reco_moves):
+                    board.push_uci(uci_move)
+                print(chess.pgn.Game.from_board(board))
             print('bestmove {}'.format(bestmove))
         elif instruction == 'quit':
             return
