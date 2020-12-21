@@ -169,13 +169,13 @@ def make_frc_castling(bitsplat_unit_planes, zero_plane):
     return queenside, kingside
 
 
-def make_canonical_unit_planes(bitsplat_unit_planes, zero_plane):
+def make_canonical_unit_planes(bitsplat_unit_planes, stm_plane, zero_plane):
     # For canonical the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then en-passant.
     queenside, kingside = make_frc_castling(bitsplat_unit_planes, zero_plane)
     enpassant = tf.concat(
         [zero_plane[:, :, :7], bitsplat_unit_planes[:, 4:, :1]], 2)
     unit_planes = tf.concat(
-        [queenside, kingside, zero_plane, zero_plane, enpassant], 1)
+        [queenside, kingside, stm_plane, zero_plane, enpassant], 1)
     return unit_planes
 
 
@@ -192,7 +192,13 @@ def extract_outputs(raw, zero_plane):
     bitsplat_unit_planes = tf.minimum(
         1., tf.cast(bitsplat_unit_planes, tf.float32))
     unit_planes = tf.cast(unit_planes, tf.float32)
-    return ply_count, rule_50_target, tf.reshape(make_canonical_unit_planes(bitsplat_unit_planes, zero_plane), [-1, 5, 64])
+    return ply_count, rule_50_target, tf.reshape(make_canonical_unit_planes(bitsplat_unit_planes, zero_plane, zero_plane), [-1, 5, 64])
+
+
+def make_armageddon_stm(invariance_plane):
+    # invariance_plane contains values of 128 or higher if its black side to move, 127 or lower otherwise.
+    # Convert this to 0,1 by subtracting off 127 and then clipping.
+    return tf.clip_by_value(invariance_plane - 127., 0., 1.)
 
 
 def extract_inputs_outputs_if4(raw):
@@ -211,7 +217,9 @@ def extract_inputs_outputs_if4(raw):
 
     rule50_plane, zero_plane, one_plane = extract_rule50_100_zero_one(raw)
 
-    unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, zero_plane)
+    armageddon_stm = make_armageddon_stm(extract_invariance(raw))
+
+    unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, armageddon_stm, zero_plane)
 
     pop_planes = extract_pop_planes(raw)
 

@@ -87,94 +87,22 @@ def calculate_input(instruction, board):
     # TODO: Allow to depopultae some of the inputs.
     for i in range(18, 24):
         input_data[0, i, :, :] = 1.0
-        
-    transform = 0
-    if not board.has_castling_rights(True) and not board.has_castling_rights(False):
-        king_sq = board.pieces(chess.KING, not flip).pop()
-        if flip:
-            king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
+    if flip:
+        input_data[0, 14, :, :] = 1.0
 
-        if king_sq % 8 < 4:
-            transform |= 1
-            king_sq = king_sq + (7 - 2*(king_sq % 8))
-        if len(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip))) == 0:
-            if king_sq // 8 >= 4:
-                transform |= 2
-                king_sq = king_sq + 8 * (7 - 2*(king_sq // 8))
-            if king_sq // 8 > 7 - king_sq % 8:
-                transform |= 4
-            elif king_sq // 8 == 7 - king_sq % 8:
-                def choose_transform(bitboard, transform, flip):
-                    if flip:
-                        bitboard = chess.flip_vertical(bitboard)
-                    if (transform & 1) != 0:
-                        bitboard = chess.flip_horizontal(bitboard)
-                    if (transform & 2) != 0:
-                        bitboard = chess.flip_vertical(bitboard)
-                    alternative = chess.flip_anti_diagonal(bitboard)
-                    if alternative < bitboard:
-                        return 1
-                    if alternative > bitboard:
-                        return -1
-                    return 0
-                def should_transform_ad(board, transform, flip):
-                    allbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.PAWN, flip)).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.KNIGHT, flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.BISHOP, flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.ROOK, flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.QUEEN, flip)).union(board.pieces(chess.KING, not flip)).union(board.pieces(chess.KING, flip)))
-                    outcome = choose_transform(allbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    stmbits = int(board.pieces(chess.PAWN, not flip).union(board.pieces(chess.KNIGHT, not flip)).union(board.pieces(chess.BISHOP, not flip)).union(board.pieces(chess.ROOK, not flip)).union(board.pieces(chess.QUEEN, not flip)).union(board.pieces(chess.KING, not flip)))
-                    outcome = choose_transform(stmbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    kingbits = int(board.pieces(chess.KING, not flip).union(board.pieces(chess.KING, flip)))
-                    outcome = choose_transform(kingbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    queenbits = int(board.pieces(chess.QUEEN, not flip).union(board.pieces(chess.QUEEN, flip)))
-                    outcome = choose_transform(queenbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    rookbits = int(board.pieces(chess.ROOK, not flip).union(board.pieces(chess.ROOK, flip)))
-                    outcome = choose_transform(rookbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    knightbits = int(board.pieces(chess.KNIGHT, not flip).union(board.pieces(chess.KNIGHT, flip)))
-                    outcome = choose_transform(knightbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
-                    bishopbits = int(board.pieces(chess.BISHOP, not flip).union(board.pieces(chess.BISHOP, flip)))
-                    outcome = choose_transform(bishopbits, transform, flip)
-                    if outcome == 1:
-                        return True
-                    if outcome == -1:
-                        return False
+    return input_data, flip
 
-                    return False
-                if should_transform_ad(board, transform, flip):
-                    transform |= 4
-                
-    if transform != 0:
-        if (transform & 1) != 0:
-            np.flip(input_data, 3)
-        if (transform & 2) != 0:
-            np.flip(input_data, 2)
-        if (transform & 4) != 0:
-            np.transpose(input_data, (0, 1, 3, 2))
-            np.flip(input_data, 2)
-            np.flip(input_data, 3)
-    return input_data, flip, transform
+
+def reverseTransformSq(sq, flip):
+    if flip:
+        sq = sq + 8 * (7 - 2*(sq // 8))
+    return sq
+
+
+def reverseTransformDir(x_delta, y_delta, flip):
+    if flip:
+        y_delta = -y_delta
+    return x_delta, y_delta
 
 
 def main(cmd):
@@ -197,7 +125,7 @@ def main(cmd):
     def first(input_data):
         return tfprocess.model(input_data, training=False)
 
-    input_data, flip, transform = calculate_input('position startpos', board)
+    input_data, flip = calculate_input('position startpos', board)
 
     outputs = first(input_data)
 
@@ -209,7 +137,7 @@ def main(cmd):
             print('uciok')
         elif instruction.startswith('position '):
             pos_start = timer()
-            input_data, flip,transform = calculate_input(instruction, board)
+            input_data, flip = calculate_input(instruction, board)
             pos_end = timer()
             #print('timed {}'.format(pos_end-pos_start))
 
@@ -221,11 +149,8 @@ def main(cmd):
             max_set = False
             max_idx = -1
             for i in range(64*128):
-                # Skip squares that currently have a piece, they are all illegal. (TODO: confirm this is true even with 960 castling)
-                # TODO: apply 'transform' in reverse to get board location.
-                pos_sq = i % 64
-                if flip:
-                    pos_sq = pos_sq + 8 * (7 - 2*(pos_sq // 8))
+                # Skip squares that currently have a piece, they are all illegal. (TODO: this can be false with 960 castling, if king stays still)
+                pos_sq = reverseTransformSq(i % 64, flip)
                 if board.piece_at(pos_sq) is not None:
                     continue
                 val = policy[0,i]
@@ -233,14 +158,113 @@ def main(cmd):
                     max_set = True
                     max_value = val
                     max_idx = i
-            print('Policy value:',max_value,'index:',max_idx)
+            for i in range(64*128):
+                # Skip squares that currently have a piece, they are all illegal. (TODO: this can be false with 960 castling, if king stays still)
+                pos_sq = reverseTransformSq(i % 64, flip)
+                if board.piece_at(pos_sq) is not None:
+                    continue
+                val = policy[0,i]
+                if val > max_value - 3.:
+                    print('Policy value:',val,'index:',i)
+                    print('Move type:', i//64, 'Starting Square:', i % 64)
+                    row = pos_sq // 8
+                    col = pos_sq % 8
+                    print('Square:',"abcdefgh"[col]+"12345678"[row])
+            print()
+            print('Max Policy value:',max_value,'index:',max_idx)
             print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
-            sq = max_idx % 64
+            sq = reverseTransformSq(max_idx % 64, flip)
             row = sq // 8
             col = sq % 8
-            if flip:
-                row = 7 - row
             print('Square:',"abcdefgh"[col]+"12345678"[row])
+            move_type = max_idx // 64
+            if move_type < 48:
+                direction = move_type // 6
+                cap_type = move_type % 6
+                x_delta = 0
+                y_delta = 0
+                if direction == 0:
+                    x_delta, y_delta = 2, 1
+                elif direction == 1:
+                    x_delta, y_delta = 1, 2
+                elif direction == 2:
+                    x_delta, y_delta = -2, 1
+                elif direction == 3:
+                    x_delta, y_delta = -1, 2
+                elif direction == 4:
+                    x_delta, y_delta = 2, -1
+                elif direction == 5:
+                    x_delta, y_delta = 1, -2
+                elif direction == 6:
+                    x_delta, y_delta = -2, -1
+                elif direction == 7:
+                    x_delta, y_delta = -1, -2
+                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+                to_row = row - y_delta
+                to_col = col - x_delta
+                print('KnightMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+            elif move_type < 96:
+                direction = (move_type-48) // 6
+                cap_type = (move_type-48) % 6
+                x_delta = 0
+                y_delta = 0
+                if direction == 0:
+                    x_delta, y_delta = 1, 0
+                elif direction == 1:
+                    x_delta, y_delta = 1, 1
+                elif direction == 2:
+                    x_delta, y_delta = 0, 1
+                elif direction == 3:
+                    x_delta, y_delta = -1, 1
+                elif direction == 4:
+                    x_delta, y_delta = -1, 0
+                elif direction == 5:
+                    x_delta, y_delta = -1, -1
+                elif direction == 6:
+                    x_delta, y_delta = 0, -1
+                elif direction == 7:
+                    x_delta, y_delta = 1, -1
+                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+                to_row = row - y_delta
+                to_col = col - x_delta
+                print('SlideMove','Towards:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+            elif move_type < 98:
+                x_delta = -1
+                y_delta = 0
+                if move_type == 97:
+                    x_delta = 1
+                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+                to_row = row - y_delta
+                to_col = col - x_delta
+                print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
+            elif move_type < 106:
+                # TODO: support 960
+                y_delta = 0
+                if move_type == 98:
+                    x_delta = -1
+                elif move_type == 105:
+                    x_delta = 1
+                else:
+                    print('Unsupported castling')
+                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+                if x_delta > 0:
+                    print('Castling, O-O')
+                else:
+                    print('Castling, O-O-O')
+            elif move_type < 117:
+                y_delta = -1
+                if move_type == 106:
+                    x_delta = 0
+                elif move_type < 112:
+                    x_delta = -1
+                    cap_type = move_type-107
+                else:
+                    x_delta = 1
+                    cap_type = move_type-112
+                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+                to_row = row - y_delta
+                to_col = col - x_delta
+                print('Promotion','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
             print('Moves from start:',moves[0,0])
             print('Rule 50 est:',r50_est[0,0])
             bestmove = '0000'
@@ -257,8 +281,5 @@ if __name__ == "__main__":
     argparser.add_argument('--cfg',
                            type=argparse.FileType('r'),
                            help='yaml configuration with training parameters')
-    argparser.add_argument('--unroll',
-                           type=int,
-                           help='Override time management with forced unroll.')
 
     main(argparser.parse_args())
