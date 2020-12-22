@@ -35,10 +35,13 @@ class SearchNode:
         self.policy_idx = None
         self.children = None
         self.bad = False
+        self.good = False
 
     def visit(self, eval_func, target_moves):
         if self.bad:
             return -500
+        if self.good:
+            return utility_calc(0, target_moves)
         if self.input_data is None:
             self.input_data, self.flip = calculate_input_from_board(self.board, self.state)
         if self.visits == 0:
@@ -77,6 +80,11 @@ class SearchNode:
                 new_child.bad = True
                 new_child.total_move_est = -500
                 new_child.visits = 1
+            else:
+                if new_child.board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR":
+                    new_child.good = True
+                    new_child.visits = 1
+                    new_child.total_move_est = utility_calc(0, target_moves - 1)
             self.children.append(new_child)
         res = self.children[best_child].visit(eval_func, target_moves - 1)
         self.visits = self.visits + 1
