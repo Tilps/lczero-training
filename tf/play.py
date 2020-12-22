@@ -310,6 +310,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if cap_type > 0:
             state.update_for_rule50_reset()
         state.update_for_new_board(board)
+        if not board.is_valid():
+            raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 96:
         direction = (move_type-48) // 6
@@ -363,6 +365,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if cap_type > 0 or board.piece_at(from_sq).piece_type == chess.PAWN:
             state.update_for_rule50_reset()
         state.update_for_new_board(board)
+        if not board.is_valid():
+            raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 98:
         x_delta = -1
@@ -384,6 +388,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_rule50_reset()
         state.update_for_new_board(board)
         state.update_for_enpassant(to_col)
+        if not board.is_valid():
+            raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 106:
         # TODO: support 960
@@ -420,6 +426,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_new_board(board)
         state.update_for_castling(x_delta > 0, flip)
+        if not board.is_valid():
+            raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[7 if x_delta > 0 else 0]+"12345678"[row]
     elif move_type < 117:
         y_delta = 1
@@ -452,6 +460,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_rule50_reset()
         state.update_for_new_board(board)
+        if not board.is_valid():
+            raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]+piece_moved.symbol().lower()
     else:
         raise ValueError("Illegal move type")
