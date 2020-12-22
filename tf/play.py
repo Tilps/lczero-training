@@ -19,6 +19,68 @@ from timeit import default_timer as timer
 
 STRICT_RULE_50 = False
 
+
+class SearchNode:
+    def __init__(self):
+        self.input_data = None
+        self.flip = None
+        self.board = None
+        self.state = None
+        self.visits = 0
+        self.total_move_est = 0
+        self.policy = None
+        self.policy_idx = None
+        self.children = None
+        self.bad = False
+
+    def visit(self, eval_func, target_moves):
+        if self.bad:
+            return -500
+        if self.input_data is None:
+            self.input_data, self.flip = calculate_input_from_board(self.board, self.state)
+        if self.visits == 0:
+            self.visits = 1
+            policy, moves, r50_est, sorted_high_policy, sorted_indicies = eval_func(self.input_data)
+            self.policy = sorted_high_policy
+            self.policy_index = sorted_indicies
+            value = -tf.math.abs(moves[0,0]-target_moves)
+            self.total_move_est = value
+            self.children = []
+            return value
+        best_child = -1
+        best_child_score = -1000
+        U_mult = 5 * math.sqrt(self.visits)
+        for i in range(len(self.policy)):
+            Q = -1
+            U = self.policy[i] * U_mult
+            if i < len(self.children):
+                child = self.children[i]
+                Q = child.total_move_est / child.visits
+                U = U / (1 + child.visits)
+            elif i > len(self.children):
+                break
+            score = Q+U
+            if score > best_child_score:
+                best_child_score = score
+                best_child = i
+        if best_child == len(self.children):
+            new_child = SearchNode()
+            new_child.board = self.board.copy()
+            new_child.state = self.state.copy()
+            try:
+                updateBoardForIndex(new_child.board, new_child.state, self.policy_index[best_child], self.flip)
+            except ValueError as err:
+                print(err)
+                new_child.bad = True
+                new_child.total_move_est = -500
+                new_child.visits = 1
+            self.children.append(new_child)
+        res = self.children[best_child].visit(eval_func, target_moves - 1)
+        self.visits = self.visits + 1
+        self.total_move_est = self.total_move_est + res
+        return res
+
+
 class OptionalState:
     def __init__(self):
         self.ks_castle_white = None
@@ -410,7 +472,21 @@ def main(cmd):
     # pre heat the net by running an inference with startpos input.
     @tf.function
     def first(input_data):
-        return tfprocess.model(input_data, training=False)
+        policy,moves,r50_est = tfprocess.model(input_data, training=False)
+        occupency_policy_mask = tf.reshape(tf.tile(tf.reduce_max(input_data[:,0:12,:, :], axis=1, keepdims=True), [1, 128, 1, 1]), [-1, 128*64])
+        illegal_filler = tf.zeros_like(policy) - 1.0e10
+        policy = tf.where(tf.equal(occupency_policy_mask, 0), policy, illegal_filler)
+        max_idx = tf.argmax(policy, 1)
+        max_value = tf.gather(policy, max_idx, axis=-1)
+        indicies = tf.where(tf.greater_equal(policy, max_value - 3.))
+        # TODO: this code 'works' only if the batch size of input is 1.
+        high_policy = tf.gather_nd(policy, indicies)
+        sort_order = tf.argsort(high_policy, direction="DESCENDING")
+        sorted_high_policy = tf.gather(high_policy, sort_order)
+        sorted_high_policy = tf.nn.softmax(sorted_high_policy)
+        sorted_indicies = tf.gather(indicies, sort_order)
+        return policy, moves, r50_est, sorted_high_policy, sorted_indicies[:,1]
+
 
     state = OptionalState()
     input_data, flip = calculate_input('position startpos', board, state)
@@ -418,6 +494,7 @@ def main(cmd):
     outputs = first(input_data)
 
     reco_moves = []
+    target_moves = None
 
     instruction_override = ""
     while True:
@@ -428,6 +505,7 @@ def main(cmd):
             print('uciok')
         elif instruction.startswith('position '):
             reco_moves = []
+            target_moves = None
             state = OptionalState()
             pos_start = timer()
             input_data, flip = calculate_input(instruction, board, state)
@@ -437,10 +515,7 @@ def main(cmd):
         elif instruction.startswith('go '):
             go_start = timer()
             # Do evil things that are not uci compliant... This loop should be on a different thread so it can be interrupted by stop, if this was actually uci :P
-            policy, moves, r50_est = first(input_data)
-            occupency_policy_mask = tf.reshape(tf.tile(tf.reduce_max(input_data[:,0:12,:, :], axis=1, keepdims=True), [1, 128, 1, 1]), [-1, 128*64])
-            illegal_filler = tf.zeros_like(policy) - 1.0e10
-            policy = tf.where(tf.equal(occupency_policy_mask, 0), policy, illegal_filler)
+            policy, moves, r50_est, sorted_high_policy, sorted_indicies = first(input_data)
             max_idx = tf.argmax(policy, 1)[0]
             max_value = policy[0, max_idx]
 ##            max_value = 0
@@ -475,6 +550,29 @@ def main(cmd):
             print('Rule 50 est:',r50_est[0,0])
             print('Max Policy value:',max_value,'index:',max_idx)
             print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
+            if target_moves is None:
+                target_moves = moves[0,0]
+            else:
+                target_moves = target_moves - 1
+            root_node = SearchNode()
+            root_node.board = board
+            root_node.flip = flip
+            root_node.state = state
+            root_node.input_data = input_data
+            root_node.policy = sorted_high_policy
+            root_node.policy_index = sorted_indicies
+            root_node.visits = 1
+            root_node.total_move_est = -tf.math.abs(moves[0,0]-target_moves)
+            root_node.children = []
+            for i in range(100):
+                root_node.visit(first, target_moves)
+            max_count = -1
+            for i in range(len(root_node.children)):
+                if root_node.children[i].visits > max_count:
+                    max_idx = root_node.policy_index[i]
+                    max_count = root_node.children[i].visits
+                print('Child:',root_node.children[i].visits, root_node.policy_index[i])
+            
             reco_moves.append(updateBoardForIndex(board, state, max_idx, flip))
             input_data, flip = calculate_input('position fen '+board.fen(), board, state)
             bestmove = '0000'
