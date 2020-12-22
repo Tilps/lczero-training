@@ -545,7 +545,9 @@ def main(cmd):
             print('Max Policy value:',max_value,'index:',max_idx)
             print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
             if target_moves is None:
-                target_moves = moves[0,0]
+                # Add some bonus here to account for moves estimate not being very accurate.
+                # Can't go too big though or it'll create 3 folds too frequently.
+                target_moves = moves[0,0] + 8
             else:
                 target_moves = target_moves - 1
             root_node = SearchNode()
