@@ -17,6 +17,8 @@ import logging
 from tfprocess import TFProcess
 from timeit import default_timer as timer
 
+STRICT_RULE_50 = False
+
 class OptionalState:
     def __init__(self):
         self.ks_castle_white = None
@@ -30,6 +32,8 @@ class OptionalState:
     def update_for_rule50_reset(self):
         if self.rule50 is not None:
             if self.rule50 > 0:
+                if STRICT_RULE_50:
+                    raise ValueError("Resetting rule 50 too early.")
                 print("Resetting rule 50 early!!")
             self.rule50 = None
 
@@ -37,6 +41,8 @@ class OptionalState:
         if self.rule50 is not None:
             self.rule50 = self.rule50 - 1
             if self.rule50 < 0:
+                if STRICT_RULE_50:
+                    raise ValueError("Failed to reset rule 50 in time.")
                 print("Failed to reset rule 50 in time!")
                 self.rule50 = None
         # If there are no candidate enpassant pawns we could set self.enpassant to -1.
@@ -80,6 +86,18 @@ class OptionalState:
             else:
                 self.enpassant = -1
             self.rule50 = board.halfmove_clock
+
+    def copy(self):
+        res = OptionalState();
+        res.ks_castle_white = self.ks_castle_white
+        res.ks_castle_black = self.ks_castle_black
+        res.qs_castle_white = self.qs_castle_white
+        res.qs_castle_black = self.qs_castle_black
+        res.enpassant = self.enpassant
+        res.rule50 = self.rule50
+        res.first_time = self.first_time
+        return res
+
 
 
 def calculate_input(instruction, board, state):
@@ -174,6 +192,206 @@ def reverseTransformDir(x_delta, y_delta, flip):
     return x_delta, y_delta
 
 
+def updateBoardForIndex(board, state, max_idx, flip):
+    from_sq = reverseTransformSq(max_idx % 64, flip)
+    if board.piece_at(from_sq) is not None:
+        # TODO: If adding support for 960 - this could be a valid castling move.
+        raise ValueError("From square not empty.")
+    row = from_sq // 8
+    col = from_sq % 8
+    #print('Square:',"abcdefgh"[col]+"12345678"[row])
+    move_type = max_idx // 64
+    if move_type < 48:
+        direction = move_type // 6
+        cap_type = move_type % 6
+        x_delta = 0
+        y_delta = 0
+        if direction == 0:
+            x_delta, y_delta = 2, 1
+        elif direction == 1:
+            x_delta, y_delta = 1, 2
+        elif direction == 2:
+            x_delta, y_delta = -2, 1
+        elif direction == 3:
+            x_delta, y_delta = -1, 2
+        elif direction == 4:
+            x_delta, y_delta = 2, -1
+        elif direction == 5:
+            x_delta, y_delta = 1, -2
+        elif direction == 6:
+            x_delta, y_delta = -2, -1
+        elif direction == 7:
+            x_delta, y_delta = -1, -2
+        x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        to_row = row - y_delta
+        to_col = col - x_delta
+        #print('KnightMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+        sq = to_row*8+to_col
+        piece_moved = board.remove_piece_at(sq)
+        if piece_moved is None:
+            raise ValueError("To square for knight move was empty.")
+        board.set_piece_at(from_sq, piece_moved)
+        if cap_type == 1:
+            board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 2:
+            board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 3:
+            board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 4:
+            board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 5:
+            board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+        board.turn = chess.WHITE if flip else chess.BLACK
+        if cap_type > 0:
+            state.update_for_rule50_reset()
+        state.update_for_new_board(board)
+        return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
+    elif move_type < 96:
+        direction = (move_type-48) // 6
+        cap_type = (move_type-48) % 6
+        x_delta = 0
+        y_delta = 0
+        if direction == 0:
+            x_delta, y_delta = 1, 0
+        elif direction == 1:
+            x_delta, y_delta = 1, 1
+        elif direction == 2:
+            x_delta, y_delta = 0, 1
+        elif direction == 3:
+            x_delta, y_delta = -1, 1
+        elif direction == 4:
+            x_delta, y_delta = -1, 0
+        elif direction == 5:
+            x_delta, y_delta = -1, -1
+        elif direction == 6:
+            x_delta, y_delta = 0, -1
+        elif direction == 7:
+            x_delta, y_delta = 1, -1
+        x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        to_row = row - y_delta
+        to_col = col - x_delta
+        while True:
+            if to_row < 0 or to_row > 7 or to_col < 0 or to_col > 7:
+                raise ValueError("Slide move goes off board")
+            sq = to_row*8+to_col
+            if board.piece_at(sq) is not None:
+                break
+            to_row = to_row - y_delta
+            to_col = to_col - x_delta
+        sq = to_row*8+to_col
+        #print('SlideMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+        piece_moved = board.remove_piece_at(sq)
+        if piece_moved is None:
+            raise ValueError("Slide move goes off board")
+        board.set_piece_at(from_sq, piece_moved)
+        if cap_type == 1:
+            board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 2:
+            board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 3:
+            board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 4:
+            board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 5:
+            board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+        board.turn = chess.WHITE if flip else chess.BLACK
+        if cap_type > 0 or board.piece_at(from_sq).piece_type == chess.PAWN:
+            state.update_for_rule50_reset()
+        state.update_for_new_board(board)
+        return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
+    elif move_type < 98:
+        x_delta = -1
+        y_delta = 1
+        if move_type == 97:
+            x_delta = 1
+        x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        to_row = row - y_delta
+        to_col = col - x_delta
+        sq = to_row*8+to_col
+        #print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
+        # TODO: check enpassant captured position is empty.
+        piece_moved = board.remove_piece_at(sq)
+        if piece_moved is None:
+            raise ValueError("Illegal enpassant")
+        board.set_piece_at(from_sq, piece_moved)
+        board.set_piece_at(row*8+to_col, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
+        board.turn = chess.WHITE if flip else chess.BLACK
+        state.update_for_rule50_reset()
+        state.update_for_new_board(board)
+        state.update_for_enpassant(to_col)
+        return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
+    elif move_type < 106:
+        # TODO: support 960
+        y_delta = 0
+        if move_type == 98:
+            x_delta = -1
+        elif move_type == 105:
+            x_delta = 1
+        else:
+            raise ValueError("Unsupported Castling")
+        x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        if x_delta > 0:
+            #print('Castling, O-O')
+            piece_moved = board.remove_piece_at(row*8+6)
+            if piece_moved is None:
+                raise ValueError("Illegal castling")
+            board.set_piece_at(from_sq, piece_moved)
+            piece_moved = board.remove_piece_at(row*8+5)
+            if piece_moved is None:
+                raise ValueError("Illegal castling")
+            #TODO: verify destination spot is empty (unless supporting 960 castling)
+            board.set_piece_at(row*8+7, piece_moved)
+        else:
+            #print('Castling, O-O-O')
+            piece_moved = board.remove_piece_at(row*8+2)
+            if piece_moved is None:
+                raise ValueError("Illegal castling")
+            board.set_piece_at(from_sq, piece_moved)
+            piece_moved = board.remove_piece_at(row*8+3)
+            if piece_moved is None:
+                raise ValueError("Illegal castling")
+            #TODO: verify destination spot is empty (unless supporting 960 castling)
+            board.set_piece_at(row*8, piece_moved)
+        board.turn = chess.WHITE if flip else chess.BLACK
+        state.update_for_new_board(board)
+        state.update_for_castling(x_delta > 0, flip)
+        return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[7 if x_delta > 0 else 0]+"12345678"[row]
+    elif move_type < 117:
+        y_delta = 1
+        if move_type == 106:
+            x_delta = 0
+            cap_type = 0
+        elif move_type < 112:
+            x_delta = -1
+            cap_type = move_type-107
+        else:
+            x_delta = 1
+            cap_type = move_type-112
+        x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        to_row = row - y_delta
+        to_col = col - x_delta
+        sq = to_row*8+to_col
+        #print('Promotion','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
+        piece_moved = board.remove_piece_at(sq)
+        if piece_moved is None:
+            raise ValueError("Illegal promotion")
+        board.set_piece_at(from_sq, chess.Piece(chess.PAWN, chess.WHITE if flip else chess.BLACK))
+        if cap_type == 1:
+            board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 2:
+            board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 3:
+            board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
+        elif cap_type == 4:
+            board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
+        board.turn = chess.WHITE if flip else chess.BLACK
+        state.update_for_rule50_reset()
+        state.update_for_new_board(board)
+        return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]+piece_moved.symbol().lower()
+    else:
+        raise ValueError("Illegal move type")
+
+
 def main(cmd):
     tf.get_logger().setLevel(logging.ERROR)
     cfg = yaml.safe_load(cmd.cfg.read())
@@ -224,7 +442,7 @@ def main(cmd):
             illegal_filler = tf.zeros_like(policy) - 1.0e10
             policy = tf.where(tf.equal(occupency_policy_mask, 0), policy, illegal_filler)
             max_idx = tf.argmax(policy, 1)[0]
-            max_value = policy[0,max_idx]
+            max_value = policy[0, max_idx]
 ##            max_value = 0
 ##            max_set = False
 ##            max_idx = -1
@@ -253,205 +471,12 @@ def main(cmd):
 ##                    col = pos_sq % 8
 ##                    print('Square:',"abcdefgh"[col]+"12345678"[row])
             print()
-            print('Max Policy value:',max_value,'index:',max_idx)
-            print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
-            from_sq = reverseTransformSq(max_idx % 64, flip)
-            row = from_sq // 8
-            col = from_sq % 8
-            print('Square:',"abcdefgh"[col]+"12345678"[row])
-            move_type = max_idx // 64
-            if move_type < 48:
-                direction = move_type // 6
-                cap_type = move_type % 6
-                x_delta = 0
-                y_delta = 0
-                if direction == 0:
-                    x_delta, y_delta = 2, 1
-                elif direction == 1:
-                    x_delta, y_delta = 1, 2
-                elif direction == 2:
-                    x_delta, y_delta = -2, 1
-                elif direction == 3:
-                    x_delta, y_delta = -1, 2
-                elif direction == 4:
-                    x_delta, y_delta = 2, -1
-                elif direction == 5:
-                    x_delta, y_delta = 1, -2
-                elif direction == 6:
-                    x_delta, y_delta = -2, -1
-                elif direction == 7:
-                    x_delta, y_delta = -1, -2
-                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
-                to_row = row - y_delta
-                to_col = col - x_delta
-                print('KnightMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
-                sq = to_row*8+to_col
-                piece_moved = board.remove_piece_at(sq)
-                if piece_moved is None:
-                    print('Illegal KnightMove')
-                board.set_piece_at(from_sq, piece_moved)
-                if cap_type == 1:
-                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 2:
-                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 3:
-                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 4:
-                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 5:
-                    board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
-                board.turn = chess.WHITE if flip else chess.BLACK
-                if cap_type > 0:
-                    state.update_for_rule50_reset()
-                state.update_for_new_board(board)
-                input_data, flip = calculate_input('position fen '+board.fen(), board, state)
-                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
-            elif move_type < 96:
-                direction = (move_type-48) // 6
-                cap_type = (move_type-48) % 6
-                x_delta = 0
-                y_delta = 0
-                if direction == 0:
-                    x_delta, y_delta = 1, 0
-                elif direction == 1:
-                    x_delta, y_delta = 1, 1
-                elif direction == 2:
-                    x_delta, y_delta = 0, 1
-                elif direction == 3:
-                    x_delta, y_delta = -1, 1
-                elif direction == 4:
-                    x_delta, y_delta = -1, 0
-                elif direction == 5:
-                    x_delta, y_delta = -1, -1
-                elif direction == 6:
-                    x_delta, y_delta = 0, -1
-                elif direction == 7:
-                    x_delta, y_delta = 1, -1
-                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
-                to_row = row - y_delta
-                to_col = col - x_delta
-                while True:
-                    if to_row < 0 or to_row > 7 or to_col < 0 or to_col > 7:
-                        print('Illegal slide')
-                        break
-                    sq = to_row*8+to_col
-                    if board.piece_at(sq) is not None:
-                        break
-                    to_row = to_row - y_delta
-                    to_col = to_col - x_delta
-                sq = to_row*8+to_col
-                print('SlideMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
-                piece_moved = board.remove_piece_at(sq)
-                if piece_moved is None:
-                    print('Illegal slide')
-                board.set_piece_at(from_sq, piece_moved)
-                if cap_type == 1:
-                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 2:
-                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 3:
-                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 4:
-                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 5:
-                    board.set_piece_at(sq, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
-                board.turn = chess.WHITE if flip else chess.BLACK
-                if cap_type > 0 or board.piece_at(from_sq).piece_type == chess.PAWN:
-                    state.update_for_rule50_reset()
-                state.update_for_new_board(board)
-                input_data, flip = calculate_input('position fen '+board.fen(), board, state)
-                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
-            elif move_type < 98:
-                x_delta = -1
-                y_delta = 1
-                if move_type == 97:
-                    x_delta = 1
-                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
-                to_row = row - y_delta
-                to_col = col - x_delta
-                sq = to_row*8+to_col
-                print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
-                piece_moved = board.remove_piece_at(sq)
-                if piece_moved is None:
-                    print('Illegal enpassant')
-                board.set_piece_at(from_sq, piece_moved)
-                board.set_piece_at(row*8+to_col, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
-                board.turn = chess.WHITE if flip else chess.BLACK
-                state.update_for_rule50_reset()
-                state.update_for_new_board(board)
-                state.update_for_enpassant(to_col)
-                input_data, flip = calculate_input('position fen '+board.fen(), board, state)
-                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row])
-            elif move_type < 106:
-                # TODO: support 960
-                y_delta = 0
-                if move_type == 98:
-                    x_delta = -1
-                elif move_type == 105:
-                    x_delta = 1
-                else:
-                    print('Unsupported castling')
-                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
-                if x_delta > 0:
-                    print('Castling, O-O')
-                    piece_moved = board.remove_piece_at(row*8+6)
-                    if piece_moved is None:
-                        print('Illegal castling')
-                    board.set_piece_at(from_sq, piece_moved)
-                    piece_moved = board.remove_piece_at(row*8+5)
-                    if piece_moved is None:
-                        print('Illegal castling')
-                    board.set_piece_at(row*8+7, piece_moved)
-                else:
-                    print('Castling, O-O-O')
-                    piece_moved = board.remove_piece_at(row*8+2)
-                    if piece_moved is None:
-                        print('Illegal castling')
-                    board.set_piece_at(from_sq, piece_moved)
-                    piece_moved = board.remove_piece_at(row*8+3)
-                    if piece_moved is None:
-                        print('Illegal castling')
-                    board.set_piece_at(row*8, piece_moved)
-                board.turn = chess.WHITE if flip else chess.BLACK
-                state.update_for_new_board(board)
-                state.update_for_castling(x_delta > 0, flip)
-                input_data, flip = calculate_input('position fen '+board.fen(), board, state)
-                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[7 if x_delta > 0 else 0]+"12345678"[row])
-            elif move_type < 117:
-                y_delta = 1
-                if move_type == 106:
-                    x_delta = 0
-                    cap_type = 0
-                elif move_type < 112:
-                    x_delta = -1
-                    cap_type = move_type-107
-                else:
-                    x_delta = 1
-                    cap_type = move_type-112
-                x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
-                to_row = row - y_delta
-                to_col = col - x_delta
-                sq = to_row*8+to_col
-                print('Promotion','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
-                piece_moved = board.remove_piece_at(sq)
-                if piece_moved is None:
-                    print('Illegal promotion')
-                board.set_piece_at(from_sq, chess.Piece(chess.PAWN, chess.WHITE if flip else chess.BLACK))
-                if cap_type == 1:
-                    board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 2:
-                    board.set_piece_at(sq, chess.Piece(chess.ROOK, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 3:
-                    board.set_piece_at(sq, chess.Piece(chess.BISHOP, chess.BLACK if flip else chess.WHITE))
-                elif cap_type == 4:
-                    board.set_piece_at(sq, chess.Piece(chess.KNIGHT, chess.BLACK if flip else chess.WHITE))
-                board.turn = chess.WHITE if flip else chess.BLACK
-                state.update_for_rule50_reset()
-                state.update_for_new_board(board)
-                input_data, flip = calculate_input('position fen '+board.fen(), board, state)
-                reco_moves.append("abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]+piece_moved.symbol().lower())
             print('Moves from start:',moves[0,0])
             print('Rule 50 est:',r50_est[0,0])
+            print('Max Policy value:',max_value,'index:',max_idx)
+            print('Move type:', max_idx//64, 'Starting Square:', max_idx % 64)
+            reco_moves.append(updateBoardForIndex(board, state, max_idx, flip))
+            input_data, flip = calculate_input('position fen '+board.fen(), board, state)
             bestmove = '0000'
             print('Recomoves:',list(reversed(reco_moves)))
             instruction_override = instruction
