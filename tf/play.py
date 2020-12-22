@@ -81,7 +81,7 @@ class SearchNode:
                 new_child.total_move_est = -500
                 new_child.visits = 1
             else:
-                if new_child.board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR":
+                if new_child.board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" and new_child.board.turn == chess.WHITE:
                     new_child.good = True
                     new_child.visits = 1
                     new_child.total_move_est = utility_calc(0, target_moves - 1)
@@ -574,7 +574,7 @@ def main(cmd):
             bestmove = '0000'
             print('Recomoves:',list(reversed(reco_moves)))
             instruction_override = instruction
-            if board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR":
+            if board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" and !flip:
                 board.reset()
                 for uci_move in reversed(reco_moves):
                     board.push_uci(uci_move)
