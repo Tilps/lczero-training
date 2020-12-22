@@ -20,6 +20,9 @@ from timeit import default_timer as timer
 STRICT_RULE_50 = False
 
 
+def utility_calc(moves, target_moves):
+    return -tf.nn.relu(moves-target_moves)
+
 class SearchNode:
     def __init__(self):
         self.input_data = None
@@ -43,7 +46,7 @@ class SearchNode:
             policy, moves, r50_est, sorted_high_policy, sorted_indicies = eval_func(self.input_data)
             self.policy = sorted_high_policy
             self.policy_index = sorted_indicies
-            value = -tf.math.abs(moves[0,0]-target_moves)
+            value = utility_calc(moves[0,0], target_moves)
             self.total_move_est = value
             self.children = []
             return value
@@ -518,33 +521,6 @@ def main(cmd):
             policy, moves, r50_est, sorted_high_policy, sorted_indicies = first(input_data)
             max_idx = tf.argmax(policy, 1)[0]
             max_value = policy[0, max_idx]
-##            max_value = 0
-##            max_set = False
-##            max_idx = -1
-##            print('Finding Max')
-##            for i in range(64*128):
-##                # Skip squares that currently have a piece, they are all illegal. (TODO: this can be false with 960 castling, if king stays still)
-##                pos_sq = reverseTransformSq(i % 64, flip)
-##                if board.piece_at(pos_sq) is not None:
-##                    continue
-##                val = policy[0,i]
-##                if not max_set or val > max_value:
-##                    max_set = True
-##                    max_value = val
-##                    max_idx = i
-##            print('Finding nearMax')
-##            for i in range(64*128):
-##                # Skip squares that currently have a piece, they are all illegal. (TODO: this can be false with 960 castling, if king stays still)
-##                pos_sq = reverseTransformSq(i % 64, flip)
-##                if board.piece_at(pos_sq) is not None:
-##                    continue
-##                val = policy[0,i]
-##                if val > max_value - 3.:
-##                    print('Policy value:',val,'index:',i)
-##                    print('Move type:', i//64, 'Starting Square:', i % 64)
-##                    row = pos_sq // 8
-##                    col = pos_sq % 8
-##                    print('Square:',"abcdefgh"[col]+"12345678"[row])
             print()
             print('Moves from start:',moves[0,0])
             print('Rule 50 est:',r50_est[0,0])
@@ -562,7 +538,7 @@ def main(cmd):
             root_node.policy = sorted_high_policy
             root_node.policy_index = sorted_indicies
             root_node.visits = 1
-            root_node.total_move_est = -tf.math.abs(moves[0,0]-target_moves)
+            root_node.total_move_est = utility_calc(moves[0,0], target_moves)
             root_node.children = []
             for i in range(100):
                 root_node.visit(first, target_moves)
