@@ -473,6 +473,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
         sq = to_row * 8 + to_col
         #print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
         # TODO: check enpassant captured position is empty.
+        # TODO: check enpassant row is valid.
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("Illegal enpassant")
@@ -502,6 +503,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         else:
             raise ValueError("Unsupported Castling")
         x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
+        if row != (0 if flip else 7):
+            raise ValueError("Castling not happening on front rank.")
         if x_delta > 0:
             #print('Castling, O-O')
             piece_moved = board.remove_piece_at(row * 8 + 6)
@@ -564,6 +567,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         sq = to_row * 8 + to_col
         #print('Promotion','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
         piece_moved = board.remove_piece_at(sq)
+        if to_row != (7 if flip else 0):
+            raise ValueError("Promotion not occuring on back rank.")
         if piece_moved is None:
             raise ValueError("Illegal promotion")
         if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
