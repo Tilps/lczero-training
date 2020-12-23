@@ -586,6 +586,9 @@ def main(cmd):
                 # Add some bonus here to account for moves estimate not being very accurate.
                 # Can't go too big though or it'll create 3 folds too frequently.
                 target_moves = moves[0,0] + 8
+                # If fullmove_number is larger, use that instead. Users who provide a value of 1 without thinking won't be affected since the base target_moves is always greater already.
+                alternative = (board.fullmove_number - 1) * 2 + (1 if flip else 0)
+                target_moves = max(target_moves, alternative)
             else:
                 target_moves = target_moves - 1
             root_node = SearchNode()
