@@ -320,6 +320,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         x_delta, y_delta = reverseTransformDir(x_delta, y_delta, flip)
         to_row = row - y_delta
         to_col = col - x_delta
+        if to_row < 0 or to_row > 7 or to_col < 0 or to_col > 7:
+            raise ValueError("Knight move off the board")
         #print('KnightMove','To:',"abcdefgh"[to_col]+"12345678"[to_row],'Captured:',cap_type)
         sq = to_row*8+to_col
         piece_moved = board.remove_piece_at(sq)
