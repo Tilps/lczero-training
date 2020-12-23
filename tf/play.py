@@ -328,7 +328,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if piece_moved is None:
             raise ValueError("To square for knight move was empty.")
         if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
-            raise ValueError("Opponent piece moved.")            
+            raise ValueError("Opponent piece moved.")
+        if piece_moved.piece_type != chess.KNIGHT:
+            raise ValueError("Piece other than a knight doing knight moves.")
         board.set_piece_at(from_sq, piece_moved)
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
@@ -386,6 +388,20 @@ def updateBoardForIndex(board, state, max_idx, flip):
             raise ValueError("Slide move goes off board")
         if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
             raise ValueError("Opponent piece moved.")            
+        if piece_moved.piece_type == chess.KNIGHT:
+            raise ValueError("Knight doing slide moves.")
+        if piece_moved.piece_type == chess.ROOK and direction not in [0,2,4,6]:
+            raise ValueError("Rook doing diagonal moves.")
+        if piece_moved.piece_type == chess.BISHOP and direction not in [1,3,5,7]:
+            raise ValueError("Bishop doing horiz/vert moves.")
+        if piece_moved.piece_type == chess.KING and (abs(to_row-row) > 1 or abs(to_col-col) > 1):
+            raise ValueError("King sliding too far.")
+        if piece_moved.piece_type == chess.PAWN and direction not in [1,2,3]:
+            raise ValueError("Pawns can only move forward.")
+        if piece_moved.piece_type == chess.PAWN and (abs(to_row-row) + abs(to_col-col) > 2):
+            raise ValueError("Pawn sliding too far.")
+        if piece_moved.piece_type == chess.PAWN and abs(to_row-row) == 2 and row not in [1,6]:
+            raise ValueError("Pawn sliding too far for current rank.")
         board.set_piece_at(from_sq, piece_moved)
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
@@ -419,7 +435,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if piece_moved is None:
             raise ValueError("Illegal enpassant")
         if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
-            raise ValueError("Opponent piece moved.")            
+            raise ValueError("Opponent piece moved.")
+        if piece_moved.piece_type != chess.PAWN:
+            raise ValueError("Piece other than a pawn doing enpassant.")
         board.set_piece_at(from_sq, piece_moved)
         board.set_piece_at(row*8+to_col, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
         board.turn = chess.WHITE if flip else chess.BLACK
@@ -445,13 +463,17 @@ def updateBoardForIndex(board, state, max_idx, flip):
             if piece_moved is None:
                 raise ValueError("Illegal castling")
             if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
-                raise ValueError("Opponent piece moved.")            
+                raise ValueError("Opponent piece moved.")       
+            if piece_moved.piece_type != chess.KING:
+                raise ValueError("Piece other than a king doing castling.")
             board.set_piece_at(from_sq, piece_moved)
             piece_moved = board.remove_piece_at(row*8+5)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
             if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
                 raise ValueError("Opponent piece moved.")            
+            if piece_moved.piece_type != chess.ROOK:
+                raise ValueError("Piece other than a rook in castling.")
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row*8+7, piece_moved)
         else:
@@ -461,12 +483,16 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 raise ValueError("Illegal castling")
             if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
                 raise ValueError("Opponent piece moved.")            
+            if piece_moved.piece_type != chess.KING:
+                raise ValueError("Piece other than a king doing castling.")
             board.set_piece_at(from_sq, piece_moved)
             piece_moved = board.remove_piece_at(row*8+3)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
             if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
                 raise ValueError("Opponent piece moved.")            
+            if piece_moved.piece_type != chess.ROOK:
+                raise ValueError("Piece other than a rook in castling.")
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row*8, piece_moved)
         board.turn = chess.WHITE if flip else chess.BLACK
@@ -496,6 +522,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
             raise ValueError("Illegal promotion")
         if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
             raise ValueError("Opponent piece moved.")            
+        if piece_moved.piece_type == chess.KING or piece_moved.piece_type == chess.PAWN:
+            raise ValueError("Promotion to pawn or king, shouldn't happen.")
         board.set_piece_at(from_sq, chess.Piece(chess.PAWN, chess.WHITE if flip else chess.BLACK))
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
