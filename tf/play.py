@@ -25,6 +25,8 @@ def utility_calc(moves, target_moves):
 
 
 def check_extra_valid(board):
+    # This function checks for known ways board can be unreachable from start position that aren't covered by python-chess is_valid.
+    
     # If 16 white pieces, there can be no more un-captures by black pawns, so they are stuck in the files they are in. Therefore they must not be doubled.
     if chess.popcount(board.occupied_co[chess.WHITE]) == 16:
         pawn_mask = board.pawns & board.occupied_co[chess.BLACK]
@@ -37,7 +39,8 @@ def check_extra_valid(board):
         for bb_file in chess.BB_FILES:
             if chess.popcount(pawn_mask & bb_file) > 1:
                 return False
-    # TODO: if full pawn wall in place, only knights can be outside.
+    # TODO: if full starting pawn wall in place, only knights can be outside.
+    # TODO: if opponent full starting pawn wall, you must have at most the standard compliment of backrank pieces.
     return True
 
 
