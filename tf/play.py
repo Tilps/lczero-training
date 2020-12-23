@@ -23,6 +23,24 @@ STRICT_RULE_50 = False
 def utility_calc(moves, target_moves):
     return -tf.nn.relu(moves-target_moves)
 
+
+def check_extra_valid(board):
+    # If 16 white pieces, there can be no more un-captures by black pawns, so they are stuck in the files they are in. Therefore they must not be doubled.
+    if chess.popcount(board.occupied_co[chess.WHITE]) == 16:
+        pawn_mask = board.pawns & board.occupied_co[chess.BLACK]
+        for bb_file in chess.BB_FILES:
+            if chess.popcount(pawn_mask & bb_file) > 1:
+                return False
+    # And vice versa.
+    if chess.popcount(board.occupied_co[chess.BLACK]) == 16:
+        pawn_mask = board.pawns & board.occupied_co[chess.WHITE]
+        for bb_file in chess.BB_FILES:
+            if chess.popcount(pawn_mask & bb_file) > 1:
+                return False
+    # TODO: if full pawn wall in place, only knights can be outside.
+    return True
+
+
 class SearchNode:
     def __init__(self):
         self.input_data = None
@@ -303,6 +321,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("To square for knight move was empty.")
+        if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+            raise ValueError("Opponent piece moved.")            
         board.set_piece_at(from_sq, piece_moved)
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
@@ -318,7 +338,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if cap_type > 0:
             state.update_for_rule50_reset()
         state.update_for_new_board(board)
-        if not board.is_valid():
+        if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 96:
@@ -358,6 +378,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("Slide move goes off board")
+        if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+            raise ValueError("Opponent piece moved.")            
         board.set_piece_at(from_sq, piece_moved)
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
@@ -373,7 +395,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if cap_type > 0 or board.piece_at(from_sq).piece_type == chess.PAWN:
             state.update_for_rule50_reset()
         state.update_for_new_board(board)
-        if not board.is_valid():
+        if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 98:
@@ -390,13 +412,15 @@ def updateBoardForIndex(board, state, max_idx, flip):
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("Illegal enpassant")
+        if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+            raise ValueError("Opponent piece moved.")            
         board.set_piece_at(from_sq, piece_moved)
         board.set_piece_at(row*8+to_col, chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_rule50_reset()
         state.update_for_new_board(board)
         state.update_for_enpassant(to_col)
-        if not board.is_valid():
+        if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]
     elif move_type < 106:
@@ -414,10 +438,14 @@ def updateBoardForIndex(board, state, max_idx, flip):
             piece_moved = board.remove_piece_at(row*8+6)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
+            if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+                raise ValueError("Opponent piece moved.")            
             board.set_piece_at(from_sq, piece_moved)
             piece_moved = board.remove_piece_at(row*8+5)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
+            if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+                raise ValueError("Opponent piece moved.")            
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row*8+7, piece_moved)
         else:
@@ -425,16 +453,20 @@ def updateBoardForIndex(board, state, max_idx, flip):
             piece_moved = board.remove_piece_at(row*8+2)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
+            if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+                raise ValueError("Opponent piece moved.")            
             board.set_piece_at(from_sq, piece_moved)
             piece_moved = board.remove_piece_at(row*8+3)
             if piece_moved is None:
                 raise ValueError("Illegal castling")
+            if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+                raise ValueError("Opponent piece moved.")            
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row*8, piece_moved)
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_new_board(board)
         state.update_for_castling(x_delta > 0, flip)
-        if not board.is_valid():
+        if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[7 if x_delta > 0 else 0]+"12345678"[row]
     elif move_type < 117:
@@ -456,6 +488,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("Illegal promotion")
+        if piece_moved.color != (chess.WHITE if flip else chess.BLACK):
+            raise ValueError("Opponent piece moved.")            
         board.set_piece_at(from_sq, chess.Piece(chess.PAWN, chess.WHITE if flip else chess.BLACK))
         if cap_type == 1:
             board.set_piece_at(sq, chess.Piece(chess.QUEEN, chess.BLACK if flip else chess.WHITE))
@@ -468,7 +502,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_rule50_reset()
         state.update_for_new_board(board)
-        if not board.is_valid():
+        if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col]+"12345678"[row]+"abcdefgh"[to_col]+"12345678"[to_row]+piece_moved.symbol().lower()
     else:
@@ -574,7 +608,7 @@ def main(cmd):
             bestmove = '0000'
             print('Recomoves:',list(reversed(reco_moves)))
             instruction_override = instruction
-            if board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" and !flip:
+            if board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" and not flip:
                 board.reset()
                 for uci_move in reversed(reco_moves):
                     board.push_uci(uci_move)
