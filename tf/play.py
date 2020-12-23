@@ -537,7 +537,7 @@ def main(cmd):
         policy = tf.where(tf.equal(occupency_policy_mask, 0), policy, illegal_filler)
         max_idx = tf.argmax(policy, 1)
         max_value = tf.gather(policy, max_idx, axis=-1)
-        indicies = tf.where(tf.greater_equal(policy, max_value - 5.))
+        indicies = tf.where(tf.greater_equal(policy, max_value - 9.))
         # TODO: this code 'works' only if the batch size of input is 1.
         high_policy = tf.gather_nd(policy, indicies)
         sort_order = tf.argsort(high_policy, direction="DESCENDING")
