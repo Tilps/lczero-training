@@ -57,6 +57,7 @@ class SearchNode:
 
     def visit(self, eval_func, target_moves):
         if self.bad:
+            print("Bad node unavoidable")
             return -500
         if self.good:
             return utility_calc(0, target_moves)
@@ -98,6 +99,9 @@ class SearchNode:
                 new_child.bad = True
                 new_child.total_move_est = -500
                 new_child.visits = 1
+                self.children.append(new_child)
+                # Try again, to emulate prefiltering illegal moves.
+                return self.visit(eval_func, target_moves)
             else:
                 if new_child.board.board_fen() == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" and new_child.board.turn == chess.WHITE:
                     new_child.good = True
