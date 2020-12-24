@@ -394,6 +394,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 chess.Piece(chess.KNIGHT,
                             chess.BLACK if flip else chess.WHITE))
         elif cap_type == 5:
+            # is_valid check below will ensure this pawn isn't created on back rank.
             board.set_piece_at(
                 sq,
                 chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
@@ -487,6 +488,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 chess.Piece(chess.KNIGHT,
                             chess.BLACK if flip else chess.WHITE))
         elif cap_type == 5:
+            # is_valid check below will ensure this pawn isn't created on back rank.
             board.set_piece_at(
                 sq,
                 chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
