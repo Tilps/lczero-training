@@ -405,6 +405,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_new_board(board)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
+        if not board.is_legal(chess.Move.from_uci("abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
+            to_col] + "12345678"[to_row])):
+            raise ValueError("Move is illegal to perform after undone.")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
             to_col] + "12345678"[to_row]
     elif move_type < 96:
@@ -499,6 +502,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_new_board(board)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
+        if not board.is_legal(chess.Move.from_uci("abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
+            to_col] + "12345678"[to_row])):
+            raise ValueError("Move is illegal to perform after undone.")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
             to_col] + "12345678"[to_row]
     elif move_type < 98:
@@ -534,6 +540,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         board.ep_square = int(sq)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
+        if not board.is_legal(chess.Move.from_uci("abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
+            to_col] + "12345678"[to_row])):
+            raise ValueError("Move is illegal to perform after undone.")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
             to_col] + "12345678"[to_row]
     elif move_type < 106:
@@ -593,6 +602,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_castling(x_delta > 0, flip)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
+        if not board.is_legal(chess.Move.from_uci("abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
+            7 if x_delta > 0 else 0] + "12345678"[row])):
+            raise ValueError("Move is illegal to perform after undone.")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
             7 if x_delta > 0 else 0] + "12345678"[row]
     elif move_type < 117:
@@ -646,6 +658,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_new_board(board)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
+        if not board.is_legal(chess.Move.from_uci("abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
+            to_col] + "12345678"[to_row] + piece_moved.symbol().lower())):
+            raise ValueError("Move is illegal to perform after undone.")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
             to_col] + "12345678"[to_row] + piece_moved.symbol().lower()
     else:
