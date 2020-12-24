@@ -738,6 +738,10 @@ def main(cmd):
             #print('timed {}'.format(pos_end-pos_start))
 
         elif instruction.startswith('go '):
+            parts = instruction.split()
+            visit_loops_to_perform = 100
+            if len(parts) > 2 and parts[1] == "nodes":
+                visit_loops_to_perform = int(parts[2])
             go_start = timer()
             # Do evil things that are not uci compliant... This loop should be on a different thread so it can be interrupted by stop, if this was actually uci :P
             policy, moves, r50_est, sorted_high_policy, sorted_indicies = first(
@@ -770,7 +774,7 @@ def main(cmd):
             root_node.visits = 1
             root_node.total_move_est = utility_calc(moves[0, 0], target_moves)
             root_node.children = []
-            for i in range(100):
+            for i in range(visit_loops_to_perform):
                 root_node.visit(first, target_moves)
             max_count = -1
             for i in range(len(root_node.children)):
