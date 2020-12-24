@@ -506,8 +506,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         to_col = col - x_delta
         sq = to_row * 8 + to_col
         #print('Enpassant', 'To:',"abcdefgh"[to_col]+"12345678"[to_row])
-        # TODO: check enpassant captured position is empty.
-        # TODO: check enpassant row is valid.
+        if row != (4 if flip else 3):
+            raise ValueError("Enpassant from wrong row.")
         piece_moved = board.remove_piece_at(sq)
         if piece_moved is None:
             raise ValueError("Illegal enpassant")
@@ -516,6 +516,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if piece_moved.piece_type != chess.PAWN:
             raise ValueError("Piece other than a pawn doing enpassant.")
         board.set_piece_at(from_sq, piece_moved)
+        if board.piece_at(row * 8 + to_col) is not None:
+            raise ValueError("Enpassant capture location already populated")
         board.set_piece_at(
             row * 8 + to_col,
             chess.Piece(chess.PAWN, chess.BLACK if flip else chess.WHITE))
