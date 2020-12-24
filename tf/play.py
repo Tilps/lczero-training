@@ -465,6 +465,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if piece_moved.piece_type == chess.PAWN and abs(
                 to_row - row) == 2 and row not in [1, 6]:
             raise ValueError("Pawn sliding too far for current rank.")
+        if piece_moved.piece_type == chess.PAWN and (row in [0, 7] or to_row in [0, 7]):
+            raise ValueError("Pawn sliding to or from back rank.")
         board.set_piece_at(from_sq, piece_moved)
         if cap_type == 1:
             board.set_piece_at(
