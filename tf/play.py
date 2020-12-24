@@ -177,18 +177,21 @@ class OptionalState:
     def update_for_enpassant(self, col):
         self.enpassant = col
 
-    def update_for_first_time(self, board):
+    def update_for_first_time(self, board, castling_unknown, ep_unknown, r50_unknown):
         if self.first_time:
             self.first_time = False
-            self.qs_castle_white = board.has_queenside_castling_rights(True)
-            self.qs_castle_black = board.has_queenside_castling_rights(False)
-            self.ks_castle_white = board.has_kingside_castling_rights(True)
-            self.ks_castle_black = board.has_kingside_castling_rights(False)
-            if board.has_legal_en_passant():
-                self.enpassant = board.ep_square % 8
-            else:
-                self.enpassant = -1
-            self.rule50 = board.halfmove_clock
+            if not castling_unknown:
+                self.qs_castle_white = board.has_queenside_castling_rights(True)
+                self.qs_castle_black = board.has_queenside_castling_rights(False)
+                self.ks_castle_white = board.has_kingside_castling_rights(True)
+                self.ks_castle_black = board.has_kingside_castling_rights(False)
+            if not ep_unknown:
+                if board.has_legal_en_passant():
+                    self.enpassant = board.ep_square % 8
+                else:
+                    self.enpassant = -1
+            if not r50_unknown:
+                self.rule50 = board.halfmove_clock
 
     def copy(self):
         res = OptionalState()
@@ -208,10 +211,41 @@ def calculate_input(instruction, board, state):
     board.reset()
     parts = instruction.split()
     started = False
+    castling_unknown = False
+    ep_unknown = False
+    r50_unknown = False
     if len(parts) > 2 and parts[1] == "fen":
         last_idx = len(parts)
         if "moves" in parts:
             last_idx = parts.index("moves")
+        # Assume white to move if only board fen provided.
+        if last_idx <= 3:
+            parts[3:3] = "w"
+            last_idx = last_idx + 1
+        if last_idx <= 4:
+            parts[4:4] = "?"
+            last_idx = last_idx + 1
+        if parts[4] == "?":
+            parts[4] = "-"
+            castling_unknown = True
+        if last_idx <= 5:
+            parts[5:5] = "?"
+            last_idx = last_idx + 1
+        if parts[5] == "?":
+            parts[5] = "-"
+            ep_unknown = True
+        if last_idx <= 6:
+            parts[6:6] = "?"
+            last_idx = last_idx + 1
+        if parts[6] == "?":
+            parts[6] = "0"
+            r50_unknown = True
+        if last_idx <= 7:
+            parts[7:7] = "?"
+            last_idx = last_idx + 1
+        if parts[7] == "?":
+            parts[7] = "1"
+            
         # fen is from parts[2] to parts[last_idx-1] inclusive.
         board.set_fen(' '.join(parts[2:last_idx]))
 
@@ -220,7 +254,7 @@ def calculate_input(instruction, board, state):
             board.push_uci(parts[i])
         if parts[i] == 'moves':
             started = True
-    state.update_for_first_time(board)
+    state.update_for_first_time(board, castling_unknown, ep_unknown, r50_unknown)
     print('OptionalState:', state.qs_castle_white, state.qs_castle_black,
           state.ks_castle_white, state.ks_castle_black, state.enpassant,
           state.rule50)
