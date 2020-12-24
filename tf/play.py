@@ -564,6 +564,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 raise ValueError("Piece other than a rook in castling.")
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row * 8 + 7, piece_moved)
+            board.castling_rights |= (chess.BB_H1 if flip else chess.BB_H8)
         else:
             #print('Castling, O-O-O')
             piece_moved = board.remove_piece_at(row * 8 + 2)
@@ -583,6 +584,7 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 raise ValueError("Piece other than a rook in castling.")
             #TODO: verify destination spot is empty (unless supporting 960 castling)
             board.set_piece_at(row * 8, piece_moved)
+            board.castling_rights |= (chess.BB_A1 if flip else chess.BB_A8)
         board.turn = chess.WHITE if flip else chess.BLACK
         state.update_for_new_board(board)
         state.update_for_castling(x_delta > 0, flip)
