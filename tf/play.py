@@ -17,7 +17,7 @@ import logging
 from tfprocess import TFProcess
 from timeit import default_timer as timer
 
-STRICT_RULE_50 = False
+STRICT_RULE_50 = True
 
 
 def utility_calc(moves, target_moves):
