@@ -769,9 +769,9 @@ def main(cmd):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
-    'Tensorflow pipeline for training Leela Chess.')
+    'Reverse chess game generator script.')
     argparser.add_argument('--cfg',
                            type=argparse.FileType('r'),
-                           help='yaml configuration with training parameters')
+                           help='yaml configuration with network parameters')
 
     main(argparser.parse_args())
