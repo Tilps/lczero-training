@@ -340,6 +340,9 @@ def updateBoardForIndex(board, state, max_idx, flip):
     col = from_sq % 8
     #print('Square:',"abcdefgh"[col]+"12345678"[row])
     move_type = max_idx // 64
+    # If enpassant rights are known, move must be a pawn push to have created them.
+    if state.enpassant is not None and state.enpassant >= 0 and move_type != 60:
+        raise ValueError("Position with enpasasnt rights can only have been created by a forward slide.")
     if move_type < 48:
         direction = move_type // 6
         cap_type = move_type % 6
@@ -470,6 +473,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         if piece_moved.piece_type == chess.PAWN and abs(
                 to_row - row) == 2 and row not in [1, 6]:
             raise ValueError("Pawn sliding too far for current rank.")
+        if state.enpassant is not None and state.enpassant >= 0 and (piece_moved.piece_type != chess.PAWN or abs(to_row - row) != 2 or to_col != state.enpassant):
+            raise ValueError("Position with enpasasnt rights can only have been created by a pawn movement of 2 rows in the enpassant column.")
         if piece_moved.piece_type == chess.PAWN and (row in [0, 7] or to_row in [0, 7]):
             raise ValueError("Pawn sliding to or from back rank.")
         board.set_piece_at(from_sq, piece_moved)
