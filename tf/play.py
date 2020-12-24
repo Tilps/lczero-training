@@ -151,6 +151,7 @@ class OptionalState:
         # If there are no candidate enpassant pawns we could set self.enpassant to -1.
         # However only setting it to -1 in that case provides no value, since -1 is only useful if there are enpassant candidate pawns.
         self.enpassant = None
+        board.ep_square = None
         # TODO: technically False to None transition for castling should only happen on rook or king move affecting the specific castling option.
         # Additionally forcing False for misplaced king or rook is useless as it only provides additional meaning when the king and rook are correct.
         if self.qs_castle_white is not None and not self.qs_castle_white:
@@ -529,6 +530,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
         state.update_for_rule50_reset()
         state.update_for_new_board(board)
         state.update_for_enpassant(to_col)
+        # Force convert square to int as tensors don't support shift operators.
+        board.ep_square = int(sq)
         if not board.is_valid() or not check_extra_valid(board):
             raise ValueError("Board invalid after move")
         return "abcdefgh"[col] + "12345678"[row] + "abcdefgh"[
