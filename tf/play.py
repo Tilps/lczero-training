@@ -51,7 +51,7 @@ class SearchNode:
         self.board = None
         self.state = None
         self.visits = 0
-        self.total_move_est = 0
+        self.total_move_est = tf.constant(0.0, dtype=tf.float32)
         self.policy = None
         self.policy_idx = None
         self.children = None
@@ -61,9 +61,9 @@ class SearchNode:
     def visit(self, eval_func, target_moves):
         if self.bad:
             print("Bad node unavoidable")
-            return -500
+            return tf.constant(-500.0, dtype=tf.float32)
         if self.good:
-            return utility_calc(0, target_moves)
+            return utility_calc(tf.constant(0.0, dtype=tf.float32), target_moves)
         if self.input_data is None:
             self.input_data, self.flip = calculate_input_from_board(
                 self.board, self.state)
@@ -79,9 +79,9 @@ class SearchNode:
             return value
         best_child = -1
         best_child_score = -1000
-        U_mult = 5 * math.sqrt(self.visits)
+        U_mult = tf.constant(5.0, dtype=tf.float32) * math.sqrt(self.visits)
         for i in range(len(self.policy)):
-            Q = -1
+            Q = tf.constant(-1.0, dtype=tf.float32)
             U = self.policy[i] * U_mult
             if i < len(self.children):
                 child = self.children[i]
@@ -103,7 +103,7 @@ class SearchNode:
             except ValueError as err:
                 print(err)
                 new_child.bad = True
-                new_child.total_move_est = -500
+                new_child.total_move_est = tf.constant(-500.0, dtype=tf.float32)
                 new_child.visits = 1
                 self.children.append(new_child)
                 # Try again, to emulate prefiltering illegal moves.
@@ -722,8 +722,8 @@ def main(cmd):
                 # Can't go too big though or it'll create 3 folds too frequently.
                 target_moves = moves[0, 0] + 8
                 # If fullmove_number is larger, use that instead. Users who provide a value of 1 without thinking won't be affected since the base target_moves is always greater already.
-                alternative = (board.fullmove_number - 1) * 2 + (1 if flip else
-                                                                 0)
+                alternative = tf.constant((board.fullmove_number - 1) * 2 + (1 if flip else
+                                                                 0), tf.float32)
                 target_moves = max(target_moves, alternative)
             else:
                 target_moves = target_moves - 1
