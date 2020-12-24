@@ -574,7 +574,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 raise ValueError("Opponent piece moved.")
             if piece_moved.piece_type != chess.ROOK:
                 raise ValueError("Piece other than a rook in castling.")
-            #TODO: verify destination spot is empty (unless supporting 960 castling)
+            if board.piece_at(row * 8 + 7) is not None:
+                raise ValueError("Can't uncastle when rook location is occupied.")
             board.set_piece_at(row * 8 + 7, piece_moved)
             board.castling_rights |= (chess.BB_H1 if flip else chess.BB_H8)
         else:
@@ -594,7 +595,8 @@ def updateBoardForIndex(board, state, max_idx, flip):
                 raise ValueError("Opponent piece moved.")
             if piece_moved.piece_type != chess.ROOK:
                 raise ValueError("Piece other than a rook in castling.")
-            #TODO: verify destination spot is empty (unless supporting 960 castling)
+            if board.piece_at(row * 8) is not None:
+                raise ValueError("Can't uncastle when rook location is occupied.")
             board.set_piece_at(row * 8, piece_moved)
             board.castling_rights |= (chess.BB_A1 if flip else chess.BB_A8)
         board.turn = chess.WHITE if flip else chess.BLACK
